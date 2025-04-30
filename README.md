@@ -1,8 +1,9 @@
 # RFDiffusion to Genie2 Converter
 
-A Python tool to convert RFDiffusion-style motif specifications to [Genie2](https://github.com/aqlaboratory/genie2) format for protein design. This tool is particularly useful for preparing input files for [SALAD's](https://github.com/mjendrusch/salad) multi-motif scaffolding.
+A Python tool to convert RFDiffusion-style motif specifications to [Genie2](https://github.com/aqlaboratory/genie2) format for protein design. This tool is particularly useful for preparing input files for [SALAD's](https://github.com/mjendrusch/salad) multi-motif scaffolding and heterodimer design.
 
 ## Installation
+
 ```bash
 git clone https://github.com/ssiddhantsharma/rfdiffusion-to-genie2.git
 cd rfdiffusion-to-genie2
@@ -25,43 +26,72 @@ python rfd2genie.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" -
 
 ## RFDiffusion Format Syntax
 
-The input format follows this pattern: `[Chain][Start]-[End][Motif]/[Linker]/[Chain][Start]-[End][Motif]`
+The input format follows this pattern: `[Chain][Start]-[End][Motif Tag]/[Linker]/[Chain][Start]-[End][Motif Tag]`
 
-Examples:
-- `A1-80[M1]/30/[M2]B81-100` - Two motifs on different chains with a 30-residue linker
-- `A1-29[M1]/30/[M2]A39-50/40/[M3]A2-49` - Three motifs on the same chain with linkers
+### Examples
 
-Components:
-- **Chain**: Single letter (e.g., A, B)
-- **Residue Range**: Start-End (e.g., 1-80)
+- **Multiple chains with linker:** `A1-80[M1]/30/[M2]B81-100`
+- **Multiple motifs on same chain:** `A1-29[M1]/30/[M2]A39-50/40/[M3]A2-49`
+- **Heterodimer (no linker):** `A1-30[M1]/B89-95[M2]`
+- **Heterotrimer:** `A1-30[M1]/B10-40[M2]/C5-25[M3]`
+
+### Components
+
+- **Chain:** Single letter (e.g., A, B)
+- **Residue Range:** Start-End (e.g., 1-80)
 - **Motif Tag** (optional): [M1], [M2], etc.
-- **Linker**: Numeric value representing amino acid length
+- **Linker:** Numeric value representing amino acid length
+
+## Group Assignment for Multi-Chain Complexes
+
+The converter intelligently assigns groups based on chain identifiers:
+
+- Motifs from the same chain are assigned to the same group
+- Motifs from different chains are assigned to different groups
+- First chain gets group "A", all other chains get group "B"
+
+This is particularly useful for heterodimer, heterotrimer, or other multi-chain complex designs where you want to maintain separate entities.
 
 ## Advanced Options
 
 ### Terminal Scaffolds
 
-By default, no terminal scaffolds are added. To add them:
+Add flexible regions at the N and C termini of your design to improve stability and folding:
 
 ```bash
 python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --add_terminal_scaffolds
 ```
 
+Terminal scaffolds are useful for:
+- Preventing edge effects at protein termini
+- Improving solubility of the designed protein
+- Adding buffer regions that can be removed later if needed
+
 ### Scaffold Length
 
-Control scaffold length range (default: 5-20):
+Control the minimum and maximum length of terminal scaffolds (default: 5-20 residues):
 
 ```bash
 python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_scaffold 10 --max_scaffold 30
 ```
 
+Adjusting scaffold length helps:
+- Create longer terminal regions for enhanced stability
+- Set tighter constraints when working with size-limited designs
+- Balance flexibility with structural integrity
+
 ### Total Length Factors
 
-Adjust the minimum and maximum total sequence length calculation:
+Adjust the minimum and maximum total sequence length calculation by multiplying the sum of motif and linker lengths:
 
 ```bash
 python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_factor 1.2 --max_factor 2.0
 ```
+
+Length factors are crucial for:
+- Ensuring sufficient sequence length for proper folding
+- Allowing the design algorithm enough flexibility to create novel structures
+- Constraining total protein size for expression or application requirements
 
 ### Processing Multiple Files with Different Specifications
 
@@ -82,14 +112,6 @@ Alternatively, use a JSON file:
 python rfd2genie.py --pdb_dir pdb_directory --json specs.json --output output_dir
 ```
 
-### Sequential Processing
-
-Force sequential (non-parallel) processing:
-
-```bash
-python rfd2genie.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --sequential
-```
-
 ### Validation Options
 
 Use lenient validation (continue with warnings for missing residues):
@@ -98,75 +120,31 @@ Use lenient validation (continue with warnings for missing residues):
 python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --lenient
 ```
 
-## Output Format
-
-For each input PDB file, the script generates a corresponding file in the output directory with "_genie2.pdb" appended to the original filename. Each output file contains:
-
-1. Genie2 header with motif and scaffold specifications
-2. Original PDB structure data
-
-Example header:
-```
-REMARK 999 NAME   protein_motifs
-REMARK 999 PDB    protein
-REMARK 999 INPUT  A   1  80 A
-REMARK 999 INPUT     25  35
-REMARK 999 INPUT  B  81 100 B
-REMARK 999 MINIMUM TOTAL LENGTH      125
-REMARK 999 MAXIMUM TOTAL LENGTH      250
-```
-
-## Key Features and Implementation Notes
-
-- **Residue Order Matching**: The converter ensures that motif order in the Genie2 specification matches the order defined in the RFDiffusion format specification.
-
-- **Multi-Chain Support**: The script correctly handles motifs spanning multiple chains (e.g., `A1-80[M1]/30/[M2]B81-100`).
-
-- **PDB Name Handling**: The converter automatically extracts and uses the correct PDB name in the Genie2 format.
-
-- **Overlapping Motifs**: The script properly handles overlapping motif specifications (e.g., `A1-29[M1]/30/[M2]A10-40`).
-
-- **Group Assignment**: Motifs are assigned to groups (A or B) based on their position in the specification, following Genie2 conventions.
-
-- **Residue Validation**: The script validates that the specified motif residues actually exist in the PDB file and provides warnings for missing residues.
-
-- **HETATM Support**: Handles non-standard residues (HETATMs) in motif definitions.
-
-## Validation Features
-
-The script performs strict validation by default to ensure compatibility between your motif specifications and the actual PDB content:
-
-- **Strict Validation (Default)**: The script verifies that all specified residues exist in the PDB file and will fail if any residues are missing. This helps prevent issues when using the output with SALAD.
-
-- **Lenient Validation (Optional)**: If you need to proceed despite missing residues, you can use the `--lenient` flag to allow the conversion to complete with warnings only.
-
-- **Automatic Corrections**: The script automatically handles issues like swapped start/end residue numbers and trailing slashes in the format specification.
-
 ## Integration with SALAD
 
-This converter is designed to work seamlessly with SALAD's multi-motif scaffolding capabilities. SALAD requires motif-annotated PDB files in Genie2 format, which is exactly what this converter produces.
+The converter is designed to work seamlessly with SALAD's multi-motif scaffolding:
 
-### Using with SALAD
-
-1. Convert your PDB file(s) to Genie2 format:
+1. Convert your PDB file to Genie2 format:
    ```bash
    python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs
    ```
 
 2. Use the converted file with SALAD:
    ```bash
-   python salad/training/eval_motif_benchmark.py --template genie2_pdbs/your_protein_genie2.pdb --num_designs 10 --num_steps 20 --config your_config.yml --params your_params.pt
+   python salad/training/eval_motif_benchmark.py \
+       --config multimotif_vp \
+       --params params/multimotif_vp-200k.jax \
+       --out_path designed_proteins/ \
+       --num_steps 500 --out_steps 400 --prev_threshold 0.8 \
+       --num_designs 1000 --timescale_pos "cosine(t)" \
+       --template genie2_pdbs/your_protein_genie2.pdb
    ```
 
-### SALAD Multi-motif Scaffolding
+## Key Features
 
-SALAD provides two scripts for multi-motif scaffolding:
-- `salad/training/eval_motif_benchmark.py` - For models trained with multi-motif conditioning
-- `salad/training/eval_motif_benchmark_nocond.py` - Uses structure-editing to scaffold motifs without explicit motif conditioning
-
-Both scripts accept a `--template` argument that points to your Genie2-formatted PDB file:
-```bash
-python salad/training/eval_motif_benchmark.py --template your_protein_genie2.pdb [other_options]
-```
-
-The converter ensures that your PDB files are correctly formatted for SALAD, allowing you to seamlessly integrate RFDiffusion-style specifications into the SALAD workflow.
+- **Chain-Based Group Assignment**: Automatically assigns different groups for different chains (ideal for heterodimers)
+- **Residue Validation**: Ensures that specified residues exist in the PDB file
+- **Multi-Chain Support**: Handles motifs spanning multiple chains
+- **Flexible Linkers**: Supports variable-length linkers between motifs
+- **HETATM Support**: Handles non-standard residues in motif definitions
+- **Parallel Processing**: Efficiently processes multiple PDB files simultaneously
