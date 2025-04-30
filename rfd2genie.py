@@ -147,7 +147,16 @@ class RFDiffusionToGenie2Converter:
                 start_res, end_res = end_res, start_res
                 print(f"Warning: Swapped start and end residues for motif in '{part}'")
             
-            group = "A" if len(result["motifs"]) < 2 else "B"
+            # For heterodimers: assign group based on chain identifier
+            # First motif always gets group A
+            # Motifs from different chains get different groups (A or B)
+            if len(result["motifs"]) == 0:
+                # First motif always gets group A
+                group = "A"
+            else:
+                # Check if this motif is from a different chain than the first motif
+                first_chain = result["motifs"][0]["chain"]
+                group = "A" if chain == first_chain else "B"
             
             result["motifs"].append({
                 "chain": chain,
