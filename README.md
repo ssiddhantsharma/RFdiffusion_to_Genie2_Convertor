@@ -6,7 +6,7 @@ A Python tool to convert RFDiffusion-style motif specifications to [Genie2](http
 ```bash
 git clone https://github.com/ssiddhantsharma/rfdiffusion-to-genie2.git
 cd rfdiffusion-to-genie2
-chmod +x genie2.py
+chmod +x rfd2genie.py
 ```
 
 ## Basic Usage
@@ -14,13 +14,13 @@ chmod +x genie2.py
 ### Converting a Single PDB File
 
 ```bash
-python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir
 ```
 
 ### Converting Multiple PDB Files (Same Specification)
 
 ```bash
-python genie2.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" --output output_dir
+python rfd2genie.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" --output output_dir
 ```
 
 ## RFDiffusion Format Syntax
@@ -44,7 +44,7 @@ Components:
 By default, no terminal scaffolds are added. To add them:
 
 ```bash
-python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --add_terminal_scaffolds
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --add_terminal_scaffolds
 ```
 
 ### Scaffold Length
@@ -52,7 +52,7 @@ python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" 
 Control scaffold length range (default: 5-20):
 
 ```bash
-python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_scaffold 10 --max_scaffold 30
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_scaffold 10 --max_scaffold 30
 ```
 
 ### Total Length Factors
@@ -60,7 +60,7 @@ python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" 
 Adjust the minimum and maximum total sequence length calculation:
 
 ```bash
-python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_factor 1.2 --max_factor 2.0
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_factor 1.2 --max_factor 2.0
 ```
 
 ### Processing Multiple Files with Different Specifications
@@ -74,12 +74,12 @@ protein2.pdb,A1-29[M1]/30/[M2]A39-50
 
 Then run:
 ```bash
-python genie2.py --pdb_dir pdb_directory --csv specs.csv --output output_dir
+python rfd2genie.py --pdb_dir pdb_directory --csv specs.csv --output output_dir
 ```
 
 Alternatively, use a JSON file:
 ```bash
-python genie2.py --pdb_dir pdb_directory --json specs.json --output output_dir
+python rfd2genie.py --pdb_dir pdb_directory --json specs.json --output output_dir
 ```
 
 ### Sequential Processing
@@ -87,7 +87,7 @@ python genie2.py --pdb_dir pdb_directory --json specs.json --output output_dir
 Force sequential (non-parallel) processing:
 
 ```bash
-python genie2.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --sequential
+python rfd2genie.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --sequential
 ```
 
 ### Validation Options
@@ -95,7 +95,7 @@ python genie2.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" --ou
 Use lenient validation (continue with warnings for missing residues):
 
 ```bash
-python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --lenient
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --lenient
 ```
 
 ## Output Format
@@ -150,7 +150,7 @@ This converter is designed to work seamlessly with SALAD's multi-motif scaffoldi
 
 1. Convert your PDB file(s) to Genie2 format:
    ```bash
-   python genie2.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs
+   python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs
    ```
 
 2. Use the converted file with SALAD:
