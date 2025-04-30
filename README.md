@@ -2,6 +2,13 @@
 
 A Python tool to convert RFDiffusion-style motif specifications to [Genie2](https://github.com/aqlaboratory/genie2) format for protein design. This tool is particularly useful for preparing input files for [SALAD's](https://github.com/mjendrusch/salad) multi-motif scaffolding.
 
+## Installation
+```bash
+git clone https://github.com/ssiddhantsharma/rfdiffusion-to-genie2.git
+cd rfdiffusion-to-genie2
+chmod +x genie2.py
+```
+
 ## Basic Usage
 
 ### Converting a Single PDB File
@@ -122,6 +129,8 @@ REMARK 999 MAXIMUM TOTAL LENGTH      250
 - **Group Assignment**: Motifs are assigned to groups (A or B) based on their position in the specification, following Genie2 conventions.
 
 - **Residue Validation**: The script validates that the specified motif residues actually exist in the PDB file and provides warnings for missing residues.
+
+- **HETATM Support**: Handles non-standard residues (HETATMs) in motif definitions.
 
 ## Validation Features
 
