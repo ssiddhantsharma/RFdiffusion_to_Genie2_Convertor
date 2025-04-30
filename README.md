@@ -112,13 +112,27 @@ Alternatively, use a JSON file:
 python rfd2genie.py --pdb_dir pdb_directory --json specs.json --output output_dir
 ```
 
-### Validation Options
+### Automatic Motif Numbering Correction
 
-Use lenient validation (continue with warnings for missing residues):
+If your PDB file has residue numbering that doesn't match your motif definition, you can use the auto-correct feature:
 
 ```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --lenient
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --auto_correct
 ```
+
+Auto-correction only activates when:
+- A motif is completely outside the available residue range in a chain
+- There's a clear systematic shift in numbering (e.g., off by +1 or -1)
+
+## SALAD Compatibility
+
+The converter now automatically makes output files compatible with SALAD by:
+
+1. Ensuring residue numbering is continuous (1,2,3,...) within each chain
+2. Expanding motif definitions to cover full chains while preserving which parts should be fixed vs. designable
+3. Adjusting array shapes to avoid SALAD's size mismatch errors
+
+These compatibility fixes are applied automatically for all outputs. This eliminates common errors when using the generated files with SALAD's multi-motif scaffolding.
 
 ## Integration with SALAD
 
@@ -136,14 +150,16 @@ The converter is designed to work seamlessly with SALAD's multi-motif scaffoldin
        --params params/multimotif_vp-200k.jax \
        --out_path designed_proteins/ \
        --num_steps 500 --out_steps 400 --prev_threshold 0.8 \
-       --num_designs 1000 --timescale_pos "cosine(t)" \
+       --num_designs 10 --timescale_pos "cosine(t)" \
        --template genie2_pdbs/your_protein_genie2.pdb
    ```
 
 ## Key Features
 
+- **Built-in SALAD Compatibility**: All output files are automatically compatible with SALAD
 - **Chain-Based Group Assignment**: Automatically assigns different groups for different chains (ideal for heterodimers)
-- **Residue Validation**: Ensures that specified residues exist in the PDB file
+- **Strict Residue Validation**: Ensures that specified residues exist in the PDB file
+- **Full-Chain Motif Support**: Properly handles the chain boundaries for SALAD compatibility
 - **Multi-Chain Support**: Handles motifs spanning multiple chains
 - **Flexible Linkers**: Supports variable-length linkers between motifs
 - **HETATM Support**: Handles non-standard residues in motif definitions
