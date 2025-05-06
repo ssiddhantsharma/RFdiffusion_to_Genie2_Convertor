@@ -766,19 +766,5 @@ def main():
         for file in failed_files:
             print(f"- {file}")
     
-    # Print recommendations for SALAD usage
-    print("\nFiles are ready for use with SALAD!")
-    print("Example SALAD command:")
-    if success > 0:
-        sample_file = os.path.splitext(os.path.basename(pdb_source))[0] if args.pdb_file else "your_protein"
-        print(f"python salad/training/eval_motif_benchmark.py \\")
-        print(f"    --config multimotif_vp \\")
-        print(f"    --params params/multimotif_vp-200k.jax \\")
-        print(f"    --out_path designed_proteins/ \\")
-        print(f"    --num_steps 500 --out_steps 400 --prev_threshold 0.8 \\")
-        print(f"    --num_designs 10 --timescale_pos \"cosine(t)\" \\")
-        print(f"    --template {args.output}/{sample_file}_genie2.pdb")
-
-
 if __name__ == "__main__":
     main()
