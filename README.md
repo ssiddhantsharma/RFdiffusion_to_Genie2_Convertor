@@ -107,23 +107,6 @@ Then run:
 python rfd2genie.py --pdb_dir pdb_directory --csv specs.csv --output output_dir
 ```
 
-Alternatively, use a JSON file:
-```bash
-python rfd2genie.py --pdb_dir pdb_directory --json specs.json --output output_dir
-```
-
-### Automatic Motif Numbering Correction
-
-If your PDB file has residue numbering that doesn't match your motif definition, you can use the auto-correct feature:
-
-```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --auto_correct
-```
-
-Auto-correction only activates when:
-- A motif is completely outside the available residue range in a chain
-- There's a clear systematic shift in numbering (e.g., off by +1 or -1)
-
 ## SALAD Compatibility
 
 The converter now automatically makes output files compatible with SALAD by:
@@ -162,5 +145,3 @@ The converter is designed to work seamlessly with SALAD's multi-motif scaffoldin
 - **Full-Chain Motif Support**: Properly handles the chain boundaries for SALAD compatibility
 - **Multi-Chain Support**: Handles motifs spanning multiple chains
 - **Flexible Linkers**: Supports variable-length linkers between motifs
-- **HETATM Support**: Handles non-standard residues in motif definitions
-- **Parallel Processing**: Efficiently processes multiple PDB files simultaneously
