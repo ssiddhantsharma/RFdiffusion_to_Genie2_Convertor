@@ -40,7 +40,7 @@ The input format follows this pattern: `[Chain][Start]-[End][Motif Tag]/[Linker]
 - **Chain:** Single letter (e.g., A, B)
 - **Residue Range:** Start-End (e.g., 1-80)
 - **Motif Tag** (optional): [M1], [M2], etc.
-- **Linker:** Numeric value representing amino acid length
+- **Linker:** Numeric value representing amino acid length or a range (e.g., 30 or 30-40)
 
 ## Group Assignment for Multi-Chain Complexes
 
@@ -109,7 +109,7 @@ python rfd2genie.py --pdb_dir pdb_directory --csv specs.csv --output output_dir
 
 ## SALAD Compatibility
 
-The converter now automatically makes output files compatible with SALAD by:
+The converter automatically makes output files compatible with SALAD by:
 
 1. Ensuring residue numbering is continuous (1,2,3,...) within each chain
 2. Expanding motif definitions to cover full chains while preserving which parts should be fixed vs. designable
@@ -145,3 +145,4 @@ The converter is designed to work seamlessly with SALAD's multi-motif scaffoldin
 - **Full-Chain Motif Support**: Properly handles the chain boundaries for SALAD compatibility
 - **Multi-Chain Support**: Handles motifs spanning multiple chains
 - **Flexible Linkers**: Supports variable-length linkers between motifs
+- **HETATM Support**: Handles non-standard residues in motif definitions
