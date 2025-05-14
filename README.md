@@ -73,6 +73,24 @@ REMARK 999 MINIMUM TOTAL LENGTH      116
 REMARK 999 MAXIMUM TOTAL LENGTH      215
 ```
 
+### Important Genie2 Format Considerations
+
+The converter addresses several aspects of the Genie2 format:
+
+1. **Column Precision**: Generates output following Genie2's column-specific formatting requirements with proper justification (right/left).
+
+2. **Group Assignment**: Assigns motif groups (A/B) based on chain relationships, which is essential for multi-chain designs.
+
+3. **PDB Name Integration**: Places the PDB name only in the `REMARK 999 PDB` line, not in motif segment definitions.
+
+4. **Residue Validation**: The script verifies that specified residues exist in the PDB structure but does not reorder them.
+
+5. **SALAD Compatibility**: The script applies fixes for SALAD compatibility by ensuring continuous residue numbering within each chain and expanding motif definitions to cover full chains.
+
+6. **Residue Reordering**: The script now automatically reorders residues in the PDB file to match the order specified in the RFDiffusion format string, ensuring compatibility with Genie2's requirements.  If you need to preserve the original residue order for any reason, use the ```--no_reorder flag```
+
+The script handles format conversion and basic validation, but proper preparation of input PDB files remains the user's responsibility.
+
 ## Group Assignment for Multi-Chain Complexes
 
 The converter intelligently assigns groups based on chain identifiers:
@@ -173,6 +191,12 @@ python rfd2genie.py --pdb_dir my_motifs --input "A1-80[M1]/30/[M2]B81-100" --out
 python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir results/my_designs --datadir genie2_pdbs --num_samples 1000
 ```
 
+To reproduce Genie2's multi-motif scaffolding with your own files:
+
+```bash
+python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir results/base/multimotifs --datadir genie2_pdbs --num_samples 1000
+```
+
 ### Running with SALAD
 
 The converter makes all output files automatically compatible with SALAD:
@@ -201,7 +225,6 @@ The converter automatically makes output files compatible with SALAD by:
 2. Expanding motif definitions to cover full chains while preserving which parts should be fixed vs. designable
 3. Adjusting array shapes to avoid SALAD's size mismatch errors
 
-These compatibility fixes are applied automatically for all outputs. This eliminates common errors when using the generated files with SALAD's multi-motif scaffolding.
 
 ## Key Features
 
