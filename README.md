@@ -1,6 +1,6 @@
 # RFDiffusion to Genie2 Converter
 
-A Python tool to convert RFDiffusion-style motif specifications to [Genie2](https://github.com/aqlaboratory/genie2) format for protein design. This tool is particularly useful for preparing input files for both Genie2's motif scaffolding and [SALAD's](https://github.com/mjendrusch/salad) multi-motif scaffolding and heterodimer design.
+A Python tool to convert RFDiffusion-style motif specifications to [Genie2](https://github.com/aqlaboratory/genie2) format for protein design. This tool is particularly useful for preparing input files for both Genie2's motif scaffolding and [SALAD's](https://github.com/mjendrusch/salad) multi-motif scaffolding.
 
 ## Installation
 
