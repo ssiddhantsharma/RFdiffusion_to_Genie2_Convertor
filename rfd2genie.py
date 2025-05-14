@@ -147,12 +147,11 @@ class RFDiffusionToGenie2Converter:
                 start_res, end_res = end_res, start_res
                 print(f"Warning: Swapped start and end residues for motif in '{part}'")
             
-            # Determine group based on chain identity
-            if len(result["motifs"]) == 0:
-                group = "A"  # First motif always gets group A
-            else:
-                first_chain = result["motifs"][0]["chain"]
-                group = "A" if chain == first_chain else "B"
+            # For multi-motif scaffolding, each motif gets a different group
+            # This ensures flexible relative positions and orientations between motifs
+            # A, B, C, D, ... up to Z, then wrap around if needed
+            group_idx = len(result["motifs"]) % 26
+            group = chr(65 + group_idx)  # ASCII 65 = 'A', 66 = 'B', etc.
             
             result["motifs"].append({
                 "chain": chain,
@@ -185,6 +184,7 @@ class RFDiffusionToGenie2Converter:
                 f"REMARK 999 INPUT  {motif['chain']} {motif['start_res']:3d} {motif['end_res']:3d} {motif['group']}"
             )
             
+            # Add linker after motif if available
             if i < len(parsed_data["linkers"]):
                 linker = parsed_data["linkers"][i]
                 output.append(
@@ -192,13 +192,22 @@ class RFDiffusionToGenie2Converter:
                 )
         
         # Add C-terminal scaffold if requested
-        if self.add_terminal_scaffolds:
+        if self.add_terminal_scaffolds and not output[-1].startswith("REMARK 999 INPUT     "):
             output.append(f"REMARK 999 INPUT     {self.min_scaffold_length:2d}  {self.max_scaffold_length:2d}")
         
         # Calculate total length constraints
         min_total_length = max(80, int(parsed_data["total_min_length"] * self.min_total_length_factor))
         max_total_length = max(200, int(parsed_data["total_max_length"] * self.max_total_length_factor))
         
+        # Ensure lengths are reasonable
+        if min_total_length > 1000:
+            min_total_length = 1000
+            print("Warning: Minimum total length exceeds 1000, capping at 1000.")
+        if max_total_length > 1000:
+            max_total_length = 1000
+            print("Warning: Maximum total length exceeds 1000, capping at 1000.")
+            
+        # Add total length constraints
         output.append(f"REMARK 999 MINIMUM TOTAL LENGTH      {min_total_length}")
         output.append(f"REMARK 999 MAXIMUM TOTAL LENGTH      {max_total_length}")
         
