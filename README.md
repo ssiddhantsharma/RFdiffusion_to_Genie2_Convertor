@@ -79,17 +79,23 @@ The converter addresses several aspects of the Genie2 format:
 
 1. **Column Precision**: Generates output following Genie2's column-specific formatting requirements with proper justification (right/left).
 
-2. **Group Assignment**: Assigns motif groups (A/B) based on chain relationships, which is essential for multi-chain designs.
+2. **Group Assignment for Multi-Motif Scaffolding**: Assigns a unique group letter (A, B, C, etc.) to each motif to control their relative positioning and orientation during scaffolding. This is essential for multi-motif scaffolding where each motif needs to move independently.
 
 3. **PDB Name Integration**: Places the PDB name only in the `REMARK 999 PDB` line, not in motif segment definitions.
 
-4. **Residue Validation**: The script verifies that specified residues exist in the PDB structure but does not reorder them.
+4. **Residue Validation**: Verifies that specified residues exist in the PDB structure.
 
-5. **SALAD Compatibility**: The script applies fixes for SALAD compatibility by ensuring continuous residue numbering within each chain and expanding motif definitions to cover full chains.
+5. **Residue Reordering**: Automatically reorders residues in the PDB file to match the order specified in the RFDiffusion format string, ensuring compatibility with Genie2's requirements. If you need to preserve the original residue order for any reason, use the `--no_reorder` flag.
 
-6. **Residue Reordering**: The script now automatically reorders residues in the PDB file to match the order specified in the RFDiffusion format string, ensuring compatibility with Genie2's requirements.  If you need to preserve the original residue order for any reason, use the ```--no_reorder flag```
+6. **Length Validation**: Ensures reasonable total length constraints and provides appropriate scaffolds between motifs.
 
-The script handles format conversion and basic validation, but proper preparation of input PDB files remains the user's responsibility.
+**Important Considerations:**
+
+- **Length Requirements**: For Genie2, it's important that scaffolds and motifs add up to the desired total length. The converter calculates appropriate length constraints based on the motifs and linkers you specify.
+
+- **Input PDB Quality**: While the script validates residue existence and reorders residues, it cannot correct structural issues in the input PDB files.
+
+The script now handles format conversion, residue validation, residue reordering, and proper group assignment for flexible multi-motif scaffolding.
 
 ## Group Assignment for Multi-Chain Complexes
 
@@ -191,12 +197,6 @@ python rfd2genie.py --pdb_dir my_motifs --input "A1-80[M1]/30/[M2]B81-100" --out
 python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir results/my_designs --datadir genie2_pdbs --num_samples 1000
 ```
 
-To reproduce Genie2's multi-motif scaffolding with your own files:
-
-```bash
-python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir results/base/multimotifs --datadir genie2_pdbs --num_samples 1000
-```
-
 ### Running with SALAD
 
 The converter makes all output files automatically compatible with SALAD:
@@ -225,6 +225,7 @@ The converter automatically makes output files compatible with SALAD by:
 2. Expanding motif definitions to cover full chains while preserving which parts should be fixed vs. designable
 3. Adjusting array shapes to avoid SALAD's size mismatch errors
 
+These compatibility fixes are applied automatically for all outputs. This eliminates common errors when using the generated files with SALAD's multi-motif scaffolding.
 
 ## Key Features
 
@@ -234,3 +235,4 @@ The converter automatically makes output files compatible with SALAD by:
 - **Full-Chain Motif Support**: Properly handles the chain boundaries for SALAD compatibility
 - **Multi-Chain Support**: Handles motifs spanning multiple chains
 - **Flexible Linkers**: Supports variable-length linkers between motifs
+- **HETATM Support**: Handles non-standard residues in motif definitions
