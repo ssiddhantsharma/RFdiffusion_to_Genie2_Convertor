@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-
 import os
 import re
 import argparse
@@ -8,11 +6,13 @@ import glob
 import time
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict
 
 
 def parse_pdb_structure(pdb_content):
     residues_by_chain = {}
     chain_boundaries = {}
+    atom_lines_by_residue = defaultdict(list)
     
     for line in pdb_content.splitlines():
         if line.startswith(("ATOM", "HETATM")):
@@ -25,13 +25,14 @@ def parse_pdb_structure(pdb_content):
                     chain_boundaries[chain_id] = (float('inf'), -float('inf'))
                 
                 residues_by_chain[chain_id].add(res_num)
+                atom_lines_by_residue[(chain_id, res_num)].append(line)
                 
                 min_res, max_res = chain_boundaries[chain_id]
                 chain_boundaries[chain_id] = (min(min_res, res_num), max(max_res, res_num))
             except (ValueError, IndexError):
                 continue
     
-    return residues_by_chain, chain_boundaries
+    return residues_by_chain, chain_boundaries, atom_lines_by_residue
 
 
 def validate_motifs(motifs, residues_by_chain):
@@ -359,6 +360,70 @@ def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
     return fixed_content
 
 
+def reorder_residues_for_genie2(pdb_content, motifs):
+    """
+    Reorder residues in the PDB file to match the order specified in motifs.
+    This ensures compatibility with Genie2's requirement that residue order in the PDB
+    matches the order in the motif definition.
+    
+    Args:
+        pdb_content (str): Original PDB content
+        motifs (list): List of motif dictionaries with chain, start_res, and end_res
+        
+    Returns:
+        str: Reordered PDB content
+    """
+    # Parse PDB content to get all lines and atom lines by residue
+    lines = pdb_content.splitlines()
+    non_atom_lines = [line for line in lines if not line.startswith(("ATOM", "HETATM"))]
+    
+    # Extract atom lines by chain and residue
+    _, _, atom_lines_by_residue = parse_pdb_structure(pdb_content)
+    
+    # Create an ordered list of residues based on motifs
+    ordered_residues = []
+    motif_residues = set()
+    
+    # First add all residues from motifs in the specified order
+    for motif in motifs:
+        chain = motif["chain"]
+        for res_num in range(motif["start_res"], motif["end_res"] + 1):
+            key = (chain, res_num)
+            if key in atom_lines_by_residue:
+                ordered_residues.append(key)
+                motif_residues.add(key)
+    
+    # Then add any remaining residues that weren't in motifs
+    for key in sorted(atom_lines_by_residue.keys()):
+        if key not in motif_residues:
+            ordered_residues.append(key)
+    
+    # Build the new PDB content with reordered residues
+    atom_lines = []
+    for key in ordered_residues:
+        atom_lines.extend(atom_lines_by_residue[key])
+    
+    # Get the header (lines before ATOM or HETATM)
+    header_lines = []
+    for line in lines:
+        if line.startswith(("ATOM", "HETATM")):
+            break
+        header_lines.append(line)
+    
+    # Get the footer (lines after last ATOM or HETATM)
+    footer_lines = []
+    atom_found = False
+    for line in reversed(lines):
+        if line.startswith(("ATOM", "HETATM")):
+            break
+        footer_lines.insert(0, line)
+    
+    # Combine everything
+    reordered_content = "\n".join(header_lines + atom_lines + footer_lines)
+    
+    return reordered_content
+
+
 def process_single_pdb(args):
     pdb_path, rf_format, output_dir, options = args
     pdb_file = os.path.basename(pdb_path)
@@ -368,7 +433,7 @@ def process_single_pdb(args):
         with open(pdb_path, 'r') as f:
             pdb_content = f.read()
         
-        residues_by_chain, chain_boundaries = parse_pdb_structure(pdb_content)
+        residues_by_chain, chain_boundaries = parse_pdb_structure(pdb_content)[:2]
         
         print(f"\nChain boundaries in {pdb_file}:")
         for chain, (min_res, max_res) in chain_boundaries.items():
@@ -400,6 +465,12 @@ def process_single_pdb(args):
             for chain, (min_res, max_res) in chain_boundaries.items():
                 print(f"Chain {chain}: {min_res} - {max_res}")
             return (pdb_path, False)
+        
+        # Reorder residues to match motif specifications
+        reorder_option = options.get('reorder_residues', True)
+        if reorder_option:
+            print(f"\nReordering residues to match motif specifications...")
+            pdb_content = reorder_residues_for_genie2(pdb_content, parsed_data["motifs"])
         
         combined_content = genie2_header + "\n" + pdb_content
         
@@ -481,6 +552,7 @@ def main():
     parser.add_argument('--min_factor', type=float, default=1.0, help='Minimum total length factor')
     parser.add_argument('--max_factor', type=float, default=1.5, help='Maximum total length factor')
     
+    parser.add_argument('--no_reorder', action='store_true', help='Disable residue reordering to match motif specifications')
     parser.add_argument('--verbose', '-v', action='store_true', help='Print detailed information')
     
     args = parser.parse_args()
@@ -495,6 +567,7 @@ def main():
         'max_scaffold_length': args.max_scaffold,
         'min_total_length_factor': args.min_factor,
         'max_total_length_factor': args.max_factor,
+        'reorder_residues': not args.no_reorder,
         'verbose': args.verbose
     }
     
