@@ -18,12 +18,6 @@ chmod +x rfd2genie.py
 python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir
 ```
 
-### Converting Multiple PDB Files (Same Specification)
-
-```bash
-python rfd2genie.py --pdb_dir pdb_directory --input "A1-80[M1]/30/[M2]B81-100" --output output_dir
-```
-
 ## RFDiffusion Format Syntax
 
 The input format follows this pattern: `[Chain][Start]-[End][Motif Tag]/[Linker]/[Chain][Start]-[End][Motif Tag]`
@@ -85,9 +79,9 @@ The converter addresses several aspects of the Genie2 format:
 
 4. **Residue Validation**: Verifies that specified residues exist in the PDB structure.
 
-5. **Residue Reordering**: Automatically reorders residues in the PDB file to match the order specified in the RFDiffusion format string, ensuring compatibility with Genie2's requirements. If you need to preserve the original residue order for any reason, use the `--no_reorder` flag.
+5. **Residue Reordering**: Automatically reorders residues in the PDB file to match the order specified in the RFDiffusion format string, ensuring compatibility with Genie2's requirements.
 
-6. **Length Validation**: Ensures reasonable total length constraints and provides appropriate scaffolds between motifs.
+6. **Auto-correction**: Fixes common motif definition issues with the `--auto_fix_motifs` flag.
 
 **Important Considerations:**
 
@@ -235,4 +229,3 @@ These compatibility fixes are applied automatically for all outputs. This elimin
 - **Full-Chain Motif Support**: Properly handles the chain boundaries for SALAD compatibility
 - **Multi-Chain Support**: Handles motifs spanning multiple chains
 - **Flexible Linkers**: Supports variable-length linkers between motifs
-- **HETATM Support**: Handles non-standard residues in motif definitions
