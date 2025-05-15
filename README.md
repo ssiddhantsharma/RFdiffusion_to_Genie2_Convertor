@@ -15,7 +15,7 @@ chmod +x rfd2genie.py
 ### Converting a Single PDB File
 
 ```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir  -verbose
 ```
 
 ## RFDiffusion Format Syntax
@@ -121,7 +121,7 @@ Terminal scaffolds are useful for:
 Control the minimum and maximum length of terminal scaffolds (default: 5-20 residues):
 
 ```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_scaffold 10 --max_scaffold 30
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_scaffold 10 --max_scaffold 30 --verbose
 ```
 
 Adjusting scaffold length helps:
@@ -134,7 +134,7 @@ Adjusting scaffold length helps:
 Adjust the minimum and maximum total sequence length calculation by multiplying the sum of motif and linker lengths:
 
 ```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_factor 1.2 --max_factor 2.0
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_factor 1.2 --max_factor 2.0 --verbose
 ```
 
 Length factors are crucial for:
@@ -166,7 +166,7 @@ After converting your files, you can directly use them with Genie2 for motif sca
 
 2. Run Genie2's scaffolding algorithm:
    ```bash
-   python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir results/my_designs --datadir my_converted_pdbs --num_samples 100
+   python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir results/my_designs --datadir my_converted_pdbs --num_samples 100 
    ```
 
    Key parameters:
@@ -197,7 +197,7 @@ The converter makes all output files automatically compatible with SALAD:
 
 1. Convert your PDB file to Genie2 format:
    ```bash
-   python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs
+   python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs --verbose
    ```
 
 2. Use the converted file with SALAD:
@@ -215,9 +215,11 @@ The converter makes all output files automatically compatible with SALAD:
 
 The converter automatically makes output files compatible with SALAD by:
 
-1. Ensuring residue numbering is continuous (1,2,3,...) within each chain
-2. Expanding motif definitions to cover full chains while preserving which parts should be fixed vs. designable
-3. Adjusting array shapes to avoid SALAD's size mismatch errors
+1. **Residue Renumbering**: Automatically renumbers residues to be continuous, preventing index mismatches in SALAD's array operations.
+
+2. **Full Chain Coverage**: Ensures motif definitions cover entire chains rather than just segments, which resolves the common "boolean index did not match shape of indexed array" error.
+
+3. **PDB Header Standardization**: Reorganizes PDB headers to follow the exact format expected by SALAD's parser.
 
 These compatibility fixes are applied automatically for all outputs. This eliminates common errors when using the generated files with SALAD's multi-motif scaffolding.
 
