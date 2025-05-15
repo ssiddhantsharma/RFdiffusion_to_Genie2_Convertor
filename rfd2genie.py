@@ -5,14 +5,12 @@ import re
 import argparse
 import csv
 import glob
-import time
 from pathlib import Path
-from datetime import datetime
 from collections import defaultdict
 
 
 def parse_pdb_structure(pdb_content):
-    # Extract residue information and chain boundaries from PDB content
+    """Extract residue information and chain boundaries from PDB content"""
     residues_by_chain = {}
     chain_boundaries = {}
     atom_lines_by_residue = defaultdict(list)
@@ -39,7 +37,7 @@ def parse_pdb_structure(pdb_content):
 
 
 def validate_motifs(motifs, residues_by_chain):
-    # Check if all specified residues exist in the PDB
+    """Check if all specified residues exist in the PDB"""
     all_valid = True
     errors = []
     
@@ -72,19 +70,69 @@ def validate_motifs(motifs, residues_by_chain):
     return all_valid, errors
 
 
-class RFDiffusionToGenie2Converter:
+def fix_motifs(motifs, residues_by_chain):
+    """Fix motifs to only include residues that exist in the PDB"""
+    fixed_motifs = []
+    
+    for motif in motifs:
+        chain = motif["chain"]
+        start_res = motif["start_res"]
+        end_res = motif["end_res"]
+        
+        # Skip if chain doesn't exist
+        if chain not in residues_by_chain:
+            print(f"Warning: Chain {chain} not found in PDB, skipping motif")
+            continue
+        
+        # Get the available residues in this chain
+        available_residues = sorted(residues_by_chain[chain])
+        if not available_residues:
+            print(f"Warning: Chain {chain} exists but has no residues, skipping motif")
+            continue
+        
+        # Adjust start_res to be within available residues
+        if start_res not in residues_by_chain[chain]:
+            closest_start = min(available_residues, key=lambda x: abs(x - start_res))
+            print(f"Warning: Start residue {start_res} not found in chain {chain}, using {closest_start} instead")
+            start_res = closest_start
+        
+        # Adjust end_res to be within available residues
+        if end_res not in residues_by_chain[chain]:
+            closest_end = min(available_residues, key=lambda x: abs(x - end_res))
+            print(f"Warning: End residue {end_res} not found in chain {chain}, using {closest_end} instead")
+            end_res = closest_end
+        
+        # Make sure start < end
+        if start_res > end_res:
+            start_res, end_res = end_res, start_res
+            print(f"Warning: Swapped start and end residues for chain {chain}")
+        
+        # Create fixed motif
+        fixed_motif = motif.copy()
+        fixed_motif["start_res"] = start_res
+        fixed_motif["end_res"] = end_res
+        fixed_motifs.append(fixed_motif)
+        
+        print(f"Fixed motif: Chain {chain}, Residues {start_res}-{end_res}")
+    
+    return fixed_motifs
+
+
+class MotifScaffoldConverter:
     def __init__(self, pdb_name="input_pdb", add_terminal_scaffolds=False, 
                  min_scaffold_length=5, max_scaffold_length=20,
-                 min_total_length_factor=1.0, max_total_length_factor=1.5):
+                 min_total_length_factor=1.0, max_total_length_factor=1.5,
+                 auto_fix_motifs=True):
         self.pdb_name = pdb_name
         self.add_terminal_scaffolds = add_terminal_scaffolds
         self.min_scaffold_length = min_scaffold_length
         self.max_scaffold_length = max_scaffold_length
         self.min_total_length_factor = min_total_length_factor
         self.max_total_length_factor = max_total_length_factor
+        self.auto_fix_motifs = auto_fix_motifs
     
     def parse_rfdiffusion_format(self, rf_format):
-        # Parse RFDiffusion format string into motifs and linkers
+        """Parse RFDiffusion format string into motifs and linkers"""
         result = {
             "motifs": [],
             "linkers": [],
@@ -147,11 +195,12 @@ class RFDiffusionToGenie2Converter:
                 start_res, end_res = end_res, start_res
                 print(f"Warning: Swapped start and end residues for motif in '{part}'")
             
-            # For multi-motif scaffolding, each motif gets a different group
-            # This ensures flexible relative positions and orientations between motifs
-            # A, B, C, D, ... up to Z, then wrap around if needed
-            group_idx = len(result["motifs"]) % 26
-            group = chr(65 + group_idx)  # ASCII 65 = 'A', 66 = 'B', etc.
+            # Determine motif group (A for first chain, B for second chain)
+            if len(result["motifs"]) == 0:
+                group = "A"
+            else:
+                first_chain = result["motifs"][0]["chain"]
+                group = "A" if chain == first_chain else "B"
             
             result["motifs"].append({
                 "chain": chain,
@@ -167,7 +216,7 @@ class RFDiffusionToGenie2Converter:
         return result
     
     def convert_to_genie2_format(self, parsed_data):
-        # Generate Genie2 format header
+        """Generate Genie2 format according to SALAD specifications"""
         output = []
         
         name = self.pdb_name.split(".")[0] if "." in self.pdb_name else self.pdb_name
@@ -180,6 +229,7 @@ class RFDiffusionToGenie2Converter:
         
         # Add motifs and linkers
         for i, motif in enumerate(parsed_data["motifs"]):
+            # Format according to specifications: proper spacing and right-justified numbers
             output.append(
                 f"REMARK 999 INPUT  {motif['chain']} {motif['start_res']:3d} {motif['end_res']:3d} {motif['group']}"
             )
@@ -192,104 +242,114 @@ class RFDiffusionToGenie2Converter:
                 )
         
         # Add C-terminal scaffold if requested
-        if self.add_terminal_scaffolds and not output[-1].startswith("REMARK 999 INPUT     "):
+        if self.add_terminal_scaffolds:
             output.append(f"REMARK 999 INPUT     {self.min_scaffold_length:2d}  {self.max_scaffold_length:2d}")
         
         # Calculate total length constraints
         min_total_length = max(80, int(parsed_data["total_min_length"] * self.min_total_length_factor))
         max_total_length = max(200, int(parsed_data["total_max_length"] * self.max_total_length_factor))
         
-        # Ensure lengths are reasonable
-        if min_total_length > 1000:
-            min_total_length = 1000
-            print("Warning: Minimum total length exceeds 1000, capping at 1000.")
-        if max_total_length > 1000:
-            max_total_length = 1000
-            print("Warning: Maximum total length exceeds 1000, capping at 1000.")
-            
-        # Add total length constraints
+        # Ensure length limits make sense
+        if min_total_length > max_total_length:
+            print(f"Warning: Minimum length ({min_total_length}) exceeds maximum length ({max_total_length}). Adjusting maximum.")
+            max_total_length = min_total_length + 100
+        
+        # Print a warning if total length is very large
+        if max_total_length > 500:
+            print(f"Warning: Maximum total length is {max_total_length}, which may result in long computation times.")
+        
+        # Format according to specifications: left-justified numbers
         output.append(f"REMARK 999 MINIMUM TOTAL LENGTH      {min_total_length}")
         output.append(f"REMARK 999 MAXIMUM TOTAL LENGTH      {max_total_length}")
         
         return "\n".join(output)
     
     def convert(self, rf_format):
+        """Convert RFDiffusion format to Genie2 format"""
         parsed_data = self.parse_rfdiffusion_format(rf_format)
         return self.convert_to_genie2_format(parsed_data), parsed_data
 
 
-def read_specs_from_csv(csv_file):
-    # Read mapping of PDB files to RF formats from CSV
-    specs = {}
-    try:
-        with open(csv_file, 'r', newline='') as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                if 'pdb_file' in row and 'rf_format' in row:
-                    specs[row['pdb_file']] = row['rf_format']
-    except Exception as e:
-        print(f"Error reading CSV file: {e}")
-        return {}
+def parse_genie2_motifs(pdb_content):
+    """Extract motif and linker definitions from Genie2 format PDB headers"""
+    motifs = []
+    linkers = []
+    min_total = None
+    max_total = None
     
-    return specs
-
-
-def reorder_residues_for_genie2(pdb_content, motifs):
-    # Reorder residues to match motif specification order for Genie2 compatibility
-    lines = pdb_content.splitlines()
-    non_atom_lines = [line for line in lines if not line.startswith(("ATOM", "HETATM"))]
+    for line in pdb_content.splitlines():
+        if line.startswith('REMARK 999 INPUT') and len(line.split()) >= 4:
+            parts = line.split()
+            # This is a chain/motif definition with at least 4 parts
+            if len(parts) >= 6 and len(parts[3]) == 1 and parts[3].isalpha():
+                try:
+                    chain_id = parts[3]
+                    start_res = int(parts[4])
+                    end_res = int(parts[5])
+                    group = parts[6] if len(parts) > 6 else "A"
+                    
+                    motif_tag = f"M{len(motifs) + 1}"
+                    motifs.append({
+                        "chain": chain_id,
+                        "start_res": start_res,
+                        "end_res": end_res,
+                        "tag": motif_tag,
+                        "group": group
+                    })
+                except (ValueError, IndexError):
+                    pass
+            # This is a linker definition
+            elif len(parts) >= 5:
+                try:
+                    min_length = int(parts[3])
+                    max_length = int(parts[4])
+                    linkers.append({
+                        "min_length": min_length,
+                        "max_length": max_length
+                    })
+                except (ValueError, IndexError):
+                    pass
+        elif line.startswith('REMARK 999 MINIMUM TOTAL LENGTH'):
+            try:
+                min_total = int(line.split()[-1])
+            except (ValueError, IndexError):
+                pass
+        elif line.startswith('REMARK 999 MAXIMUM TOTAL LENGTH'):
+            try:
+                max_total = int(line.split()[-1])
+            except (ValueError, IndexError):
+                pass
     
-    # Extract atom lines by chain and residue
-    _, _, atom_lines_by_residue = parse_pdb_structure(pdb_content)
+    result = {"motifs": motifs, "linkers": linkers}
     
-    # Create an ordered list of residues based on motifs
-    ordered_residues = []
-    motif_residues = set()
-    
-    # First add all residues from motifs in the specified order
-    for motif in motifs:
-        chain = motif["chain"]
-        for res_num in range(motif["start_res"], motif["end_res"] + 1):
-            key = (chain, res_num)
-            if key in atom_lines_by_residue:
-                ordered_residues.append(key)
-                motif_residues.add(key)
-    
-    # Then add any remaining residues that weren't in motifs
-    for key in sorted(atom_lines_by_residue.keys()):
-        if key not in motif_residues:
-            ordered_residues.append(key)
-    
-    # Build the new PDB content with reordered residues
-    atom_lines = []
-    for key in ordered_residues:
-        atom_lines.extend(atom_lines_by_residue[key])
-    
-    # Get the header (lines before ATOM or HETATM)
-    header_lines = []
-    for line in lines:
-        if line.startswith(("ATOM", "HETATM")):
-            break
-        header_lines.append(line)
-    
-    # Get the footer (lines after last ATOM or HETATM)
-    footer_lines = []
-    atom_found = False
-    for line in reversed(lines):
-        if line.startswith(("ATOM", "HETATM")):
-            break
-        footer_lines.insert(0, line)
-    
-    # Combine everything
-    reordered_content = "\n".join(header_lines + atom_lines + footer_lines)
-    
-    return reordered_content
+    if min_total is not None:
+        result["min_total"] = min_total
+    if max_total is not None:
+        result["max_total"] = max_total
+        
+    return result
 
 
 def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
-    # Fix PDB content for SALAD compatibility
+    """
+    Fix a PDB content specifically for SALAD to avoid the 
+    'boolean index did not match shape of indexed array' error.
+    
+    This function uses two strategies:
+    1. Renumbers residues to be continuous
+    2. Ensures motif definitions cover full chains rather than just parts
+    
+    Args:
+        pdb_content (str): The PDB file content as a string
+        fix_residue_numbering (bool): Whether to renumber residues for SALAD compatibility
+        verbose (bool): Whether to print detailed information
+        
+    Returns:
+        str: The fixed PDB content
+    """
     lines = pdb_content.splitlines()
     
+    # Extract headers (REMARK lines) and non-REMARK, non-ATOM lines
     headers = []
     non_remark_lines = []
     
@@ -299,6 +359,7 @@ def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
         elif not line.startswith(('ATOM', 'HETATM')):
             non_remark_lines.append(line)
     
+    # Analyze chains and residues
     chains = {}
     atom_lines = []
     
@@ -312,16 +373,17 @@ def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
             chains[chain_id]['residues'].add(res_num)
             atom_lines.append(line)
     
-    # Parse motif definitions from REMARK lines
+    # Extract motif definitions from REMARK lines
     motif_lines = []
     linker_lines = []
     other_remark_lines = []
+    
     motif_defs = []
     
     for line in headers:
-        if line.startswith('REMARK 999 INPUT') and len(line.split()) >= 6:
+        if line.startswith('REMARK 999 INPUT') and len(line.split()) >= 4:
             parts = line.split()
-            if len(parts[3]) == 1:  # This is a chain definition line
+            if len(parts) >= 6 and len(parts[3]) == 1 and parts[3].isalpha():
                 try:
                     chain_id = parts[3]
                     start_res = int(parts[4])
@@ -360,6 +422,7 @@ def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
             print(f"  Remapped to: 1-{len(sorted_residues)}")
     
     # CRITICAL FIX FOR SALAD: Modify motifs to cover full chains
+    # This is key to fixing the array size mismatch issue
     new_motif_lines = []
     
     for chain_id, chain_data in chains.items():
@@ -375,8 +438,10 @@ def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
         
         # If no motif found for this chain, we need to add one
         if existing_motif is None:
+            # Determine which group to assign - check other motifs
             group = "B" if len(motif_defs) > 0 and motif_defs[0]['group'] == "A" else "A"
             
+            # Create a dummy motif covering the full chain
             if fix_residue_numbering:
                 new_line = f"REMARK 999 INPUT  {chain_id} {1:3d} {len(chain_data['residues']):3d} {group}"
             else:
@@ -418,6 +483,7 @@ def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
     # Rebuild the file with modified headers
     new_remark_lines = other_remark_lines[:]
     
+    # Add modified motif lines at the beginning of the REMARK blocks
     # Get the first two lines (NAME and PDB lines)
     name_line = None
     pdb_line = None
@@ -452,9 +518,134 @@ def fix_pdb_for_salad(pdb_content, fix_residue_numbering=True, verbose=False):
     return fixed_content
 
 
-def process_single_pdb(args):
-    # Process a single PDB file with the given format string
-    pdb_path, rf_format, output_dir, options = args
+def check_and_fix_constraint_consistency(pdb_content):
+    """Check and fix constraint consistency for SALAD"""
+    lines = pdb_content.splitlines()
+    
+    # Parse residue information from PDB
+    residues_by_chain, chain_boundaries, _ = parse_pdb_structure(pdb_content)
+    
+    # Parse motif definitions
+    genie2_data = parse_genie2_motifs(pdb_content)
+    
+    # Check if motifs need fixing
+    valid, errors = validate_motifs(genie2_data["motifs"], residues_by_chain)
+    
+    # If everything is valid, no need to fix
+    if valid:
+        print("All motifs are valid, no fixes needed")
+        return pdb_content
+    
+    print("Found motif issues, applying fixes...")
+    for error in errors:
+        print(f"  {error}")
+    
+    # Fix motifs
+    fixed_motifs = fix_motifs(genie2_data["motifs"], residues_by_chain)
+    
+    # If no valid motifs remain after fixing, return original content
+    if not fixed_motifs:
+        print("Error: No valid motifs could be created after fixing. Returning original content.")
+        return pdb_content
+    
+    # Rebuild the header with fixed motifs
+    header_lines = []
+    atom_lines = []
+    footer_lines = []
+    name_line = None
+    pdb_line = None
+    atom_section_started = False
+    atom_section_ended = False
+    
+    for line in lines:
+        if line.startswith(("ATOM", "HETATM")):
+            atom_section_started = True
+            atom_lines.append(line)
+        elif atom_section_started and not atom_section_ended:
+            if line.startswith(("TER", "END", "CONECT")):
+                atom_lines.append(line)
+            else:
+                atom_section_ended = True
+                footer_lines.append(line)
+        elif atom_section_ended:
+            footer_lines.append(line)
+        elif line.startswith("REMARK 999 NAME"):
+            name_line = line
+        elif line.startswith("REMARK 999 PDB"):
+            pdb_line = line
+        elif not line.startswith(("REMARK 999 INPUT", "REMARK 999 MINIMUM TOTAL LENGTH", "REMARK 999 MAXIMUM TOTAL LENGTH")):
+            header_lines.append(line)
+    
+    # Rebuild the file with fixed headers
+    new_lines = []
+    
+    # Add name and PDB lines first
+    if name_line:
+        new_lines.append(name_line)
+    if pdb_line:
+        new_lines.append(pdb_line)
+    
+    # Add fixed motifs
+    for motif in fixed_motifs:
+        new_lines.append(f"REMARK 999 INPUT  {motif['chain']} {motif['start_res']:3d} {motif['end_res']:3d} {motif['group']}")
+        
+    # Add linkers
+    for i, linker in enumerate(genie2_data["linkers"]):
+        if i < len(fixed_motifs) - 1:  # Only add linkers between motifs
+            new_lines.append(f"REMARK 999 INPUT     {linker['min_length']:2d}  {linker['max_length']:2d}")
+    
+    # Calculate and add new total length
+    min_total = sum(motif['end_res'] - motif['start_res'] + 1 for motif in fixed_motifs)
+    max_total = min_total + 100  # Add some buffer
+    
+    if genie2_data["linkers"]:
+        linker_min = sum(linker['min_length'] for linker in genie2_data["linkers"][:len(fixed_motifs)-1])
+        linker_max = sum(linker['max_length'] for linker in genie2_data["linkers"][:len(fixed_motifs)-1])
+        min_total += linker_min
+        max_total = min_total + linker_max
+    
+    # Ensure minimum viable protein length
+    min_total = max(80, min_total)
+    max_total = max(200, max_total)
+    
+    # Use original values if present
+    if "min_total" in genie2_data and genie2_data["min_total"] >= min_total:
+        min_total = genie2_data["min_total"]
+    if "max_total" in genie2_data and genie2_data["max_total"] >= max_total:
+        max_total = genie2_data["max_total"]
+    
+    # Ensure max is greater than min
+    if max_total <= min_total:
+        max_total = min_total + 100
+    
+    new_lines.append(f"REMARK 999 MINIMUM TOTAL LENGTH      {min_total}")
+    new_lines.append(f"REMARK 999 MAXIMUM TOTAL LENGTH      {max_total}")
+    
+    # Add the rest of the content
+    new_lines.extend(header_lines)
+    new_lines.extend(atom_lines)
+    new_lines.extend(footer_lines)
+    
+    return "\n".join(new_lines)
+
+
+def read_specs_from_csv(csv_file):
+    """Read mapping of PDB files to RF formats from CSV"""
+    specs = {}
+    try:
+        with open(csv_file, 'r', newline='') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                if 'pdb_file' in row and 'rf_format' in row:
+                    specs[row['pdb_file']] = row['rf_format']
+    except Exception as e:
+        print(f"Error reading CSV file: {e}")
+        return {}
+    
+    return specs
+
+def process_single_pdb(pdb_path, rf_format, output_dir, options):
+    """Process a single PDB file with given format string"""
     pdb_file = os.path.basename(pdb_path)
     pdb_name = os.path.splitext(pdb_file)[0]
     
@@ -470,8 +661,43 @@ def process_single_pdb(args):
         for chain, (min_res, max_res) in chain_boundaries.items():
             print(f"Chain {chain}: {min_res} - {max_res} ({len(residues_by_chain[chain])} residues)")
         
+        # Check if this is already a Genie2 formatted file
+        if rf_format.lower() == "genie2" or rf_format.lower() == "auto":
+            # Extract motif definitions from the PDB file
+            genie2_data = parse_genie2_motifs(pdb_content)
+            
+            if genie2_data["motifs"]:
+                print(f"\nDetected Genie2 format with {len(genie2_data['motifs'])} motifs")
+                for i, motif in enumerate(genie2_data["motifs"]):
+                    print(f"Motif {i+1}: Chain {motif['chain']}, Residues {motif['start_res']}-{motif['end_res']}")
+                
+                # Check and fix constraint consistency
+                fixed_content = check_and_fix_constraint_consistency(pdb_content)
+                
+                # Apply SALAD fix
+                verbose = options.get('verbose', False)
+                print(f"\nApplying SALAD compatibility fixes...")
+                fixed_content = fix_pdb_for_salad(
+                    fixed_content, 
+                    fix_residue_numbering=True,
+                    verbose=verbose
+                )
+                
+                # Write to output file
+                output_path = os.path.join(output_dir, f"{pdb_name}_genie2.pdb")
+                with open(output_path, 'w') as f:
+                    f.write(fixed_content)
+                
+                print(f"Successfully created {output_path}")
+                return (pdb_path, True)
+            elif rf_format.lower() == "auto":
+                print("No Genie2 motif definitions found, trying RFDiffusion format...")
+            else:
+                print("Error: No Genie2 motif definitions found in the PDB file")
+                return (pdb_path, False)
+        
         # Initialize converter with options
-        converter = RFDiffusionToGenie2Converter(
+        converter = MotifScaffoldConverter(
             pdb_name,
             add_terminal_scaffolds=options.get('add_terminal_scaffolds', False),
             min_scaffold_length=options.get('min_scaffold_length', 5),
@@ -490,29 +716,54 @@ def process_single_pdb(args):
         # Validate motifs
         valid, errors = validate_motifs(parsed_data["motifs"], residues_by_chain)
         
-        for error in errors:
-            print(f"Error - {pdb_file}: {error}")
-        
         if not valid:
-            print(f"Error: Validation failed for {pdb_file}. Residues specified in motif definition do not exist in the PDB file.")
-            print("\nAvailable residue ranges:")
-            for chain, (min_res, max_res) in chain_boundaries.items():
-                print(f"Chain {chain}: {min_res} - {max_res}")
-            return (pdb_path, False)
-        
-        # Reorder residues to match motif specifications
-        reorder_option = options.get('reorder_residues', True)
-        if reorder_option:
-            print(f"\nReordering residues to match motif specifications...")
-            pdb_content = reorder_residues_for_genie2(pdb_content, parsed_data["motifs"])
+            for error in errors:
+                print(f"Error - {pdb_file}: {error}")
+            
+            # Auto-fix motifs if requested
+            if options.get('auto_fix_motifs', True):
+                print("Fixing invalid motif definitions...")
+                parsed_data["motifs"] = fix_motifs(parsed_data["motifs"], residues_by_chain)
+                
+                # Regenerate the header with fixed motifs
+                converter = MotifScaffoldConverter(
+                    pdb_name,
+                    add_terminal_scaffolds=options.get('add_terminal_scaffolds', False),
+                    min_scaffold_length=options.get('min_scaffold_length', 5),
+                    max_scaffold_length=options.get('max_scaffold_length', 20),
+                    min_total_length_factor=options.get('min_total_length_factor', 1.0),
+                    max_total_length_factor=options.get('max_total_length_factor', 1.5)
+                )
+                
+                # Create a mock RF format string from the fixed motifs and linkers
+                mock_rf_format = ""
+                for i, motif in enumerate(parsed_data["motifs"]):
+                    if i > 0:
+                        # Add linker
+                        if i-1 < len(parsed_data["linkers"]):
+                            linker = parsed_data["linkers"][i-1]
+                            mock_rf_format += f"/{linker['min_length']}-{linker['max_length']}/"
+                        else:
+                            mock_rf_format += "/10-20/"
+                    
+                    # Add motif
+                    mock_rf_format += f"{motif['chain']}{motif['start_res']}-{motif['end_res']}[{motif['tag']}]"
+                
+                genie2_header, _ = converter.convert(mock_rf_format)
+            else:
+                print(f"Error: Validation failed for {pdb_file}. Use --auto_fix_motifs to automatically fix issues.")
+                print("\nAvailable residue ranges:")
+                for chain, (min_res, max_res) in chain_boundaries.items():
+                    print(f"Chain {chain}: {min_res} - {max_res}")
+                return (pdb_path, False)
         
         # Combine header and PDB content
         combined_content = genie2_header + "\n" + pdb_content
         
-        # Apply SALAD compatibility fixes
+        # Apply SALAD fix
         verbose = options.get('verbose', False)
         print(f"\nApplying SALAD compatibility fixes...")
-        combined_content = fix_pdb_for_salad(
+        fixed_content = fix_pdb_for_salad(
             combined_content, 
             fix_residue_numbering=True,
             verbose=verbose
@@ -521,23 +772,20 @@ def process_single_pdb(args):
         # Write to output file
         output_path = os.path.join(output_dir, f"{pdb_name}_genie2.pdb")
         with open(output_path, 'w') as f:
-            f.write(combined_content)
+            f.write(fixed_content)
         
         print(f"Successfully created {output_path}")
         return (pdb_path, True)
     except Exception as e:
         print(f"Error processing {pdb_path}: {e}")
         return (pdb_path, False)
-
-
+    
 def process_pdb_files(pdb_sources, specs, output_dir, default_rf_format=None, options=None):
-    # Process multiple PDB files
     if options is None:
         options = {}
     
     os.makedirs(output_dir, exist_ok=True)
     
-    # Find PDB files to process
     pdb_files = []
     if isinstance(pdb_sources, str):
         if os.path.isdir(pdb_sources):
@@ -551,25 +799,26 @@ def process_pdb_files(pdb_sources, specs, output_dir, default_rf_format=None, op
         print(f"No PDB files found")
         return (0, 0, [])
     
-    # Create tasks for each PDB file
-    tasks = []
+    print(f"Processing {len(pdb_files)} files...")
+    success_count = 0
+    failure_count = 0
+    failed_files = []
+    
     for pdb_path in pdb_files:
         pdb_file = os.path.basename(pdb_path)
         rf_format = specs.get(pdb_file, default_rf_format)
         
         if rf_format:
-            tasks.append((pdb_path, rf_format, output_dir, options))
+            result = process_single_pdb(pdb_path, rf_format, output_dir, options)
+            
+            if result[1]:
+                success_count += 1
+            else:
+                failure_count += 1
+                failed_files.append(pdb_path)
         else:
-            print(f"Skipping {pdb_file} - no RF format specified and no default provided")
-    
-    # Process all tasks
-    print(f"Processing {len(tasks)} files sequentially...")
-    results = [process_single_pdb(task) for task in tasks]
-    
-    # Summarize results
-    success_count = sum(1 for _, success in results if success)
-    failure_count = len(results) - success_count
-    failed_files = [path for path, success in results if not success]
+            print(f"Skipping {pdb_file} - no RF format specified")
+            failed_files.append(pdb_path)
     
     return (success_count, failure_count, failed_files)
 
@@ -583,10 +832,10 @@ def main():
     input_group.add_argument('--pdb_dir', '-d', help='Path to a directory containing PDB files')
     
     spec_group = parser.add_mutually_exclusive_group(required=True)
-    spec_group.add_argument('--input', '-i', help='RFDiffusion format string (e.g., "A1-80[M1]/30/[M2]B81-100")')
+    spec_group.add_argument('--input', '-i', help='RFDiffusion format string or "genie2" to process existing Genie2 PDB')
     spec_group.add_argument('--csv', '-c', help='CSV file mapping PDB files to RFDiffusion formats')
     
-    parser.add_argument('--output', '-o', required=True, help='Output directory for Genie2 files')
+    parser.add_argument('--output', '-o', required=True, help='Output directory for processed PDB files')
     
     parser.add_argument('--add_terminal_scaffolds', action='store_true', help='Add scaffolds at the beginning and end')
     parser.add_argument('--min_scaffold', type=int, default=5, help='Minimum scaffold length')
@@ -594,7 +843,8 @@ def main():
     parser.add_argument('--min_factor', type=float, default=1.0, help='Minimum total length factor')
     parser.add_argument('--max_factor', type=float, default=1.5, help='Maximum total length factor')
     
-    parser.add_argument('--no_reorder', action='store_true', help='Disable residue reordering to match motif specifications')
+    parser.add_argument('--auto_fix_motifs', action='store_true', default=True, help='Automatically fix motif definitions')
+    parser.add_argument('--no_fix', action='store_true', help='Disable automatic fixing of motif definitions')
     parser.add_argument('--verbose', '-v', action='store_true', help='Print detailed information')
     
     args = parser.parse_args()
@@ -611,14 +861,17 @@ def main():
         'max_scaffold_length': args.max_scaffold,
         'min_total_length_factor': args.min_factor,
         'max_total_length_factor': args.max_factor,
-        'reorder_residues': not args.no_reorder,
+        'auto_fix_motifs': args.auto_fix_motifs and not args.no_fix,
         'verbose': args.verbose
     }
     
+    # Determine PDB source
     pdb_source = args.pdb_file if args.pdb_file else args.pdb_dir
     
     # Process files
-    start_time = time.time()
+    print(f"\n--- Starting SALAD Motif Converter ---")
+    print(f"Processing PDB source: {pdb_source}")
+    
     success, failure, failed_files = process_pdb_files(
         pdb_source, 
         specs, 
@@ -626,17 +879,18 @@ def main():
         default_rf_format=args.input,
         options=options
     )
-    elapsed_time = time.time() - start_time
     
     # Print summary
-    print(f"\nProcessing complete in {elapsed_time:.2f} seconds")
+    print(f"\nProcessing complete")
     print(f"Successfully processed: {success} files")
     print(f"Failed to process: {failure} files")
     
     if failed_files:
         print("\nFailed files:")
         for file in failed_files:
-            print(f"- {file}")
+            print(f"- {os.path.basename(file)}")
     
+    print("\nOutput files are ready for SALAD 🧬")
+
 if __name__ == "__main__":
     main()
