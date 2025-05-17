@@ -185,7 +185,6 @@ The converter ensures optimal compatibility with SALAD by implementing several c
        --num_designs 10 --timescale_pos "cosine(t)" \
        --template genie2_pdbs/your_protein_genie2.pdb
    ```
-   ```
 
 ## Key Features
 
