@@ -15,7 +15,7 @@ chmod +x rfd2genie.py
 ### Converting a Single PDB File
 
 ```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir  -verbose
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --verbose
 ```
 
 ## RFDiffusion Format Syntax
@@ -71,7 +71,7 @@ REMARK 999 MAXIMUM TOTAL LENGTH      215
 
 The converter addresses several aspects of the Genie2 format:
 
-1. **Column Precision**: Generates output following Genie2's column-specific formatting requirements with proper justification (right/left).
+1. **Column Precision**: Generates output following Genie2's column-specific formatting requirements with proper justification (right/left). This is absolutely critical for SALAD compatibility.
 
 2. **Group Assignment for Multi-Motif Scaffolding**: Assigns a unique group letter (A, B, C, etc.) to each motif to control their relative positioning and orientation during scaffolding. This is essential for multi-motif scaffolding where each motif needs to move independently.
 
@@ -81,15 +81,7 @@ The converter addresses several aspects of the Genie2 format:
 
 5. **Residue Reordering**: Automatically reorders residues in the PDB file to match the order specified in the RFDiffusion format string, ensuring compatibility with Genie2's requirements.
 
-6. **Auto-correction**: Fixes common motif definition issues with the `--auto_fix_motifs` flag.
-
-**Important Considerations:**
-
-- **Length Requirements**: For Genie2, it's important that scaffolds and motifs add up to the desired total length. The converter calculates appropriate length constraints based on the motifs and linkers you specify.
-
-- **Input PDB Quality**: While the script validates residue existence and reorders residues, it cannot correct structural issues in the input PDB files.
-
-The script now handles format conversion, residue validation, residue reordering, and proper group assignment for flexible multi-motif scaffolding.
+6. **Auto-correction**: Fixes common motif definition issues.
 
 ## Group Assignment for Multi-Chain Complexes
 
@@ -116,32 +108,6 @@ Terminal scaffolds are useful for:
 - Improving solubility of the designed protein
 - Adding buffer regions that can be removed later if needed
 
-### Scaffold Length
-
-Control the minimum and maximum length of terminal scaffolds (default: 5-20 residues):
-
-```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_scaffold 10 --max_scaffold 30 --verbose
-```
-
-Adjusting scaffold length helps:
-- Create longer terminal regions for enhanced stability
-- Set tighter constraints when working with size-limited designs
-- Balance flexibility with structural integrity
-
-### Total Length Factors
-
-Adjust the minimum and maximum total sequence length calculation by multiplying the sum of motif and linker lengths:
-
-```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --min_factor 1.2 --max_factor 2.0 --verbose
-```
-
-Length factors are crucial for:
-- Ensuring sufficient sequence length for proper folding
-- Allowing the design algorithm enough flexibility to create novel structures
-- Constraining total protein size for expression or application requirements
-
 ### Processing Multiple Files with Different Specifications
 
 Create a CSV file (e.g., `specs.csv`):
@@ -155,8 +121,6 @@ Then run:
 ```bash
 python rfd2genie.py --pdb_dir pdb_directory --csv specs.csv --output output_dir
 ```
-
-## Using Converted Files
 
 ### Running with Genie2
 
@@ -193,7 +157,18 @@ python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir resu
 
 ### Running with SALAD
 
-The converter makes all output files automatically compatible with SALAD:
+The converter ensures optimal compatibility with SALAD by implementing several critical fixes:
+
+1. **Exact Formatting**: The script strictly adheres to the column-specific formatting requirements of Genie2, with precise spacing, justification, and positioning. This is crucial because SALAD uses exact column positions for parsing, and even a small formatting deviation can cause hours-long processing or failure.
+
+2. **Full Chain Coverage**: Ensures motif definitions cover entire chains rather than just segments, which resolves the common "boolean index did not match shape of indexed array" error in SALAD. This fix prevents SALAD from running indefinitely or for extremely long periods.
+
+3. **Consistent Residue Numbering**: Residues are renumbered to be continuous from 1 to N for each chain, which is what SALAD expects. This eliminates array size mismatches.
+
+4. **Removal of Extraneous REMARK Lines**: Filters out non-standard REMARK lines that could confuse SALAD's parser.
+
+5. **Chain and Group Consistency**: Ensures chain IDs in motif definitions match those in the PDB structure, and that motif groups are assigned correctly.
+
 
 1. Convert your PDB file to Genie2 format:
    ```bash
@@ -210,24 +185,12 @@ The converter makes all output files automatically compatible with SALAD:
        --num_designs 10 --timescale_pos "cosine(t)" \
        --template genie2_pdbs/your_protein_genie2.pdb
    ```
-
-## SALAD Compatibility Features
-
-The converter automatically makes output files compatible with SALAD by:
-
-1. **Residue Renumbering**: Automatically renumbers residues to be continuous, preventing index mismatches in SALAD's array operations.
-
-2. **Full Chain Coverage**: Ensures motif definitions cover entire chains rather than just segments, which resolves the common "boolean index did not match shape of indexed array" error.
-
-3. **PDB Header Standardization**: Reorganizes PDB headers to follow the exact format expected by SALAD's parser.
-
-These compatibility fixes are applied automatically for all outputs. This eliminates common errors when using the generated files with SALAD's multi-motif scaffolding.
+   ```
 
 ## Key Features
 
-- **Compatible with Both Genie2 and SALAD**: Generate files that work with both protein design platforms
-- **Chain-Based Group Assignment**: Automatically assigns different groups for different chains (ideal for heterodimers)
-- **Strict Residue Validation**: Ensures that specified residues exist in the PDB file
-- **Full-Chain Motif Support**: Properly handles the chain boundaries for SALAD compatibility
-- **Multi-Chain Support**: Handles motifs spanning multiple chains
-- **Flexible Linkers**: Supports variable-length linkers between motifs
+- **Precise Format Compliance**: Implements exact Genie2 format requirements with proper spacing and justification
+- **Chain Completeness Validation**: Ensures all chains in the PDB have proper motif definitions
+- **Efficient Processing**: Streamlined code that prevents SALAD from running indefinitely
+- **Robust Error Handling**: Identifies and resolves common issues that cause SALAD failures
+- **Full Multi-Chain Support**: Properly handles heterodimers, heterotrimers, and other multi-chain complexes
