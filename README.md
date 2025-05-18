@@ -33,14 +33,14 @@ The input format follows this pattern: `[N-term extension]/[Chain][Start]-[End][
 - **With both N and C-terminal extensions:** `15/A1-80[M1]/30/[M2]B81-100/25`
 - **Variable length extensions/linkers:** `10-20/A1-80[M1]/25-35/[M2]B81-100/15-25`
 
-### Components
+### Format Components
 
-- **Chain:** Single letter (e.g., A, B)
-- **Residue Range:** Start-End (e.g., 1-80)
-- **Motif Tag** (optional): [M1], [M2], etc.
-- **Linker/Extension:** Numeric value representing amino acid length or a range (e.g., 30 or 30-40)
-- **N-terminal Extension:** Number at beginning of format string followed by "/"
-- **C-terminal Extension:** Number at end of format string preceded by "/"
+* **Chain:** Single letter (e.g., A, B)
+* **Residue Range:** Start-End (e.g., 1-80)
+* **Motif Tag** (optional): [M1], [M2], etc.
+* **Linker/Extension:** Numeric value representing amino acid length or a range (e.g., 30 or 30-40)
+* **N-terminal Extension:** Number at beginning of format string followed by "/"
+* **C-terminal Extension:** Number at end of format string preceded by "/"
 
 ### N-terminal Extensions
 
@@ -76,18 +76,18 @@ This allows the N-terminal extension to be 10-20 residues and the C-terminal ext
 
 ## Format Conversion: RFDiffusion to Genie2
 
-The script converts RFDiffusion format into Genie2's precise column-specific format:
+The Genie2 format requires exact column positioning with proper justification (right/left):
 
-| Specification | Columns | Data | Justification | Data Type |
-|---------------|---------|------|--------------|-----------|
+| Specification | Column | Data | Justification | Data Type |
+|---------------|--------|------|--------------|-----------|
 | Motif segment | 1-16 | "REMARK 999 INPUT" | - | string |
-| | 19 | Chain index of motif segment in the PDB file | - | string |
-| | 20-23 | Starting residue index of motif segment | right | int |
-| | 24-27 | Ending residue index of motif segment | right | int |
-| | 29 | Motif group that the segment belongs to | - | string |
+| | 19 | Chain index of motif segment | - | string |
+| | 20-23 | Starting residue index | right | int |
+| | 24-27 | Ending residue index | right | int |
+| | 29 | Motif group | - | string |
 | Scaffold segment | 1-16 | "REMARK 999 INPUT" | - | string |
-| | 20-23 | Minimum length of scaffold segment | right | int |
-| | 24-27 | Maximum length of scaffold segment | right | int |
+| | 20-23 | Minimum length | right | int |
+| | 24-27 | Maximum length | right | int |
 | Minimum sequence length | 1-31 | "REMARK 999 MINIMUM TOTAL LENGTH" | - | string |
 | | 38-40 | Minimum sequence length | left | int |
 | Maximum sequence length | 1-31 | "REMARK 999 MAXIMUM TOTAL LENGTH" | - | string |
@@ -125,7 +125,11 @@ The converter addresses several aspects of the Genie2 format:
 
 1. **Column Precision**: Generates output following Genie2's column-specific formatting requirements with proper justification (right/left). This is absolutely critical for SALAD compatibility.
 
-2. **Group Assignment for Multi-Motif Scaffolding**: Assigns a unique group letter (A, B, C, etc.) to each motif to control their relative positioning and orientation during scaffolding. This is essential for multi-motif scaffolding where each motif needs to move independently.
+2. **Group Assignment for Multi-Motif Scaffolding**:  Assigns groups based on chain identifiers to maintain proper spatial relationships. This is particularly useful for heterodimer, heterotrimer, or other multi-chain complex designs where you want to maintain separate entities:
+
+* Motifs from the same chain are assigned to the same group
+* Motifs from different chains are assigned to different groups
+* First chain typically gets group "A", second chain gets "B", and so on
 
 3. **PDB Name Integration**: Places the PDB name only in the `REMARK 999 PDB` line, not in motif segment definitions.
 
@@ -135,30 +139,19 @@ The converter addresses several aspects of the Genie2 format:
 
 6. **Auto-correction**: Fixes common motif definition issues.
 
-## Group Assignment for Multi-Chain Complexes
+### Scaffold Lengths
 
-The converter intelligently assigns groups based on chain identifiers:
+Scaffold lengths are directly controlled through the input format:
+* A single number (e.g., `30`) will generate a scaffold of approximately that length (with small variance)
+* A range (e.g., `20-40`) will allow SALAD/Genie2 to select a length within that range
+* The scaffold lengths are determined by your input format, not automatically calculated
 
-- Motifs from the same chain are assigned to the same group
-- Motifs from different chains are assigned to different groups
-- First chain gets group "A", all other chains get group "B"
+### Chain Identity Preservation
 
-This is particularly useful for heterodimer, heterotrimer, or other multi-chain complex designs where you want to maintain separate entities.
-
-## Advanced Options
-
-### Terminal Scaffolds
-
-Add flexible regions at the N and C termini of your design to improve stability and folding:
-
-```bash
-python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output output_dir --add_terminal_scaffolds
-```
-
-Terminal scaffolds are useful for:
-- Preventing edge effects at protein termini
-- Improving solubility of the designed protein
-- Adding buffer regions that can be removed later if needed
+When working with multiple chains, the script ensures:
+* Each chain is assigned a unique group identifier
+* Chains are kept separate in the output structure
+* No unwanted linkers are added between different chains unless specified
 
 ### Processing Multiple Files with Different Specifications
 
@@ -239,12 +232,3 @@ The converter ensures optimal compatibility with SALAD by implementing several c
        --num_designs 10 --timescale_pos "cosine(t)" \
        --template genie2_pdbs/your_protein_genie2.pdb
    ```
-
-## Key Features
-
-- **Precise Format Compliance**: Implements exact Genie2 format requirements with proper spacing and justification
-- **Chain Completeness Validation**: Ensures all chains in the PDB have proper motif definitions
-- **Efficient Processing**: Streamlined code that prevents SALAD from running indefinitely
-- **Robust Error Handling**: Identifies and resolves common issues that cause SALAD failures
-- **Full Multi-Chain Support**: Properly handles heterodimers, heterotrimers, and other multi-chain complexes
-- **Flexible Terminal Extensions**: Supports both N-terminal and C-terminal extensions without script modifications
