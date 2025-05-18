@@ -20,7 +20,7 @@ python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-10
 
 ## RFDiffusion Format Syntax
 
-The input format follows this pattern: `[Chain][Start]-[End][Motif Tag]/[Linker]/[Chain][Start]-[End][Motif Tag]`
+The input format follows this pattern: `[N-term extension]/[Chain][Start]-[End][Motif Tag]/[Linker]/[Chain][Start]-[End][Motif Tag]/[C-term extension]`
 
 ### Examples
 
@@ -28,13 +28,51 @@ The input format follows this pattern: `[Chain][Start]-[End][Motif Tag]/[Linker]
 - **Multiple motifs on same chain:** `A1-29[M1]/30/[M2]A39-50/40/[M3]A2-49`
 - **Heterodimer (no linker):** `A1-30[M1]/B89-95[M2]`
 - **Heterotrimer:** `A1-30[M1]/B10-40[M2]/C5-25[M3]`
+- **With N-terminal extension:** `20/A1-80[M1]/30/[M2]B81-100`
+- **With C-terminal extension:** `A1-80[M1]/30/[M2]B81-100/40`
+- **With both N and C-terminal extensions:** `15/A1-80[M1]/30/[M2]B81-100/25`
+- **Variable length extensions/linkers:** `10-20/A1-80[M1]/25-35/[M2]B81-100/15-25`
 
 ### Components
 
 - **Chain:** Single letter (e.g., A, B)
 - **Residue Range:** Start-End (e.g., 1-80)
 - **Motif Tag** (optional): [M1], [M2], etc.
-- **Linker:** Numeric value representing amino acid length or a range (e.g., 30 or 30-40)
+- **Linker/Extension:** Numeric value representing amino acid length or a range (e.g., 30 or 30-40)
+- **N-terminal Extension:** Number at beginning of format string followed by "/"
+- **C-terminal Extension:** Number at end of format string preceded by "/"
+
+### N-terminal Extensions
+
+Add a number at the beginning of your format string:
+```bash
+python rfd2genie.py --pdb_file your_protein.pdb --input "20/A1-80[M1]/30/[M2]B81-100" --output output_dir --verbose
+```
+This will generate a 20-residue N-terminal extension before the first motif.
+
+### C-terminal Extensions
+
+Add a number at the end of your format string:
+```bash
+python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100/40" --output output_dir --verbose
+```
+This will generate a 40-residue C-terminal extension after the last motif.
+
+### Combined Terminal Extensions
+
+Use both N and C terminal extensions:
+```bash
+python rfd2genie.py --pdb_file your_protein.pdb --input "15/A1-80[M1]/30/[M2]B81-100/25" --output output_dir --verbose
+```
+This creates a 15-residue N-terminal extension and a 25-residue C-terminal extension.
+
+### Variable Length Extensions
+
+For more flexible designs, specify ranges:
+```bash
+python rfd2genie.py --pdb_file your_protein.pdb --input "10-20/A1-80[M1]/30/[M2]B81-100/15-25" --output output_dir --verbose
+```
+This allows the N-terminal extension to be 10-20 residues and the C-terminal extension to be 15-25 residues.
 
 ## Format Conversion: RFDiffusion to Genie2
 
@@ -65,6 +103,20 @@ REMARK 999 INPUT     30  35
 REMARK 999 INPUT  B  81 100 B
 REMARK 999 MINIMUM TOTAL LENGTH      116
 REMARK 999 MAXIMUM TOTAL LENGTH      215
+```
+
+With N and C terminal extensions (`15/A1-80[M1]/30/[M2]B81-100/25`):
+
+```
+REMARK 999 NAME   protein_name_motifs
+REMARK 999 PDB    protein_name
+REMARK 999 INPUT     15  20
+REMARK 999 INPUT  A   1  80 A
+REMARK 999 INPUT     30  35
+REMARK 999 INPUT  B  81 100 B
+REMARK 999 INPUT     25  30
+REMARK 999 MINIMUM TOTAL LENGTH      156
+REMARK 999 MAXIMUM TOTAL LENGTH      265
 ```
 
 ### Important Genie2 Format Considerations
@@ -115,11 +167,12 @@ Create a CSV file (e.g., `specs.csv`):
 pdb_file,rf_format
 protein1.pdb,A1-80[M1]/30/[M2]B81-100
 protein2.pdb,A1-29[M1]/30/[M2]A39-50
+protein3.pdb,15/A1-30[M1]/25/B10-40[M2]/20
 ```
 
 Then run:
 ```bash
-python rfd2genie.py --pdb_dir pdb_directory --csv specs.csv --output output_dir
+python rfd2genie.py --pdb_dir pdb_directory --csv specs.csv --output output_dir --verbose
 ```
 
 ### Running with Genie2
@@ -149,7 +202,7 @@ For multi-motif scaffolding with Genie2, run:
 
 ```bash
 # First convert your PDB files
-python rfd2genie.py --pdb_dir my_motifs --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs
+python rfd2genie.py --pdb_dir my_motifs --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs --verbose
 
 # Then run Genie2 on the converted files
 python genie/sample_scaffold.py --name base --epoch 30 --scale 0.4 --outdir results/my_designs --datadir genie2_pdbs --num_samples 1000
@@ -169,10 +222,11 @@ The converter ensures optimal compatibility with SALAD by implementing several c
 
 5. **Chain and Group Consistency**: Ensures chain IDs in motif definitions match those in the PDB structure, and that motif groups are assigned correctly.
 
+#### SALAD Multi-Motif Scaffolding Example:
 
 1. Convert your PDB file to Genie2 format:
    ```bash
-   python rfd2genie.py --pdb_file your_protein.pdb --input "A1-80[M1]/30/[M2]B81-100" --output genie2_pdbs --verbose
+   python rfd2genie.py --pdb_file your_protein.pdb --input "15/A1-80[M1]/30/[M2]B81-100/25" --output genie2_pdbs --verbose
    ```
 
 2. Use the converted file with SALAD:
@@ -193,3 +247,4 @@ The converter ensures optimal compatibility with SALAD by implementing several c
 - **Efficient Processing**: Streamlined code that prevents SALAD from running indefinitely
 - **Robust Error Handling**: Identifies and resolves common issues that cause SALAD failures
 - **Full Multi-Chain Support**: Properly handles heterodimers, heterotrimers, and other multi-chain complexes
+- **Flexible Terminal Extensions**: Supports both N-terminal and C-terminal extensions without script modifications
