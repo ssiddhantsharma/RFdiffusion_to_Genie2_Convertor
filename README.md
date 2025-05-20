@@ -137,8 +137,6 @@ The converter addresses several aspects of the Genie2 format:
 
 5. **Residue Reordering**: Automatically reorders residues in the PDB file to match the order specified in the RFDiffusion format string, ensuring compatibility with Genie2's requirements.
 
-6. **Auto-correction**: Fixes common motif definition issues.
-
 ### Scaffold Lengths
 
 Scaffold lengths are directly controlled through the input format:
@@ -211,9 +209,7 @@ The converter ensures optimal compatibility with SALAD by implementing several c
 
 3. **Consistent Residue Numbering**: Residues are renumbered to be continuous from 1 to N for each chain, which is what SALAD expects. This eliminates array size mismatches.
 
-4. **Removal of Extraneous REMARK Lines**: Filters out non-standard REMARK lines that could confuse SALAD's parser.
-
-5. **Chain and Group Consistency**: Ensures chain IDs in motif definitions match those in the PDB structure, and that motif groups are assigned correctly.
+4. **Chain and Group Consistency**: Ensures chain IDs in motif definitions match those in the PDB structure, and that motif groups are assigned correctly.
 
 #### SALAD Multi-Motif Scaffolding Example:
 
