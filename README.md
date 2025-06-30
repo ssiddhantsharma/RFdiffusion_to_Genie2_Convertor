@@ -140,7 +140,7 @@ The converter addresses several aspects of the Genie2 format:
 ### Scaffold Lengths
 
 Scaffold lengths are directly controlled through the input format:
-* A single number (e.g., `30`) will generate a scaffold of approximately that length (with small variance)
+* A single number (e.g., `30`) will generate a scaffold of exactly that length
 * A range (e.g., `20-40`) will allow SALAD/Genie2 to select a length within that range
 * The scaffold lengths are determined by your input format, not automatically calculated
 
