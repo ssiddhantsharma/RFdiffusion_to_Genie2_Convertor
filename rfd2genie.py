@@ -4,13 +4,13 @@ import re
 import argparse
 import glob
 import csv
-from collections import defaultdict
-
+from collections import defaultdict, OrderedDict
 
 def parse_pdb(pdb_content):
-    """Extract residue information from PDB content"""
     residues_by_chain = {}
     chain_boundaries = {}
+    residue_atoms = defaultdict(list)
+    chain_order = []
     
     for line in pdb_content.splitlines():
         if line.startswith(("ATOM", "HETATM")):
@@ -21,356 +21,347 @@ def parse_pdb(pdb_content):
                 if chain_id not in residues_by_chain:
                     residues_by_chain[chain_id] = set()
                     chain_boundaries[chain_id] = (float('inf'), -float('inf'))
+                    chain_order.append(chain_id)
                 
                 residues_by_chain[chain_id].add(res_num)
                 min_res, max_res = chain_boundaries[chain_id]
                 chain_boundaries[chain_id] = (min(min_res, res_num), max(max_res, res_num))
+                residue_atoms[(chain_id, res_num)].append(line)
             except:
                 continue
     
-    return residues_by_chain, chain_boundaries
+    chain_order = list(OrderedDict.fromkeys(chain_order))
+    return residues_by_chain, chain_boundaries, residue_atoms, chain_order
 
-def parse_rf_format(rf_format):
-    # Split into parts
-    original_parts = rf_format.split("/")
-    parts = [p.strip() for p in original_parts if p.strip()]
-    
-    # Initialize structures
+def parse_rf_format(rf_format, chain_order=None):
     motifs = []
     inter_motif_linkers = []
     initial_scaffold = None
     final_scaffold = None
-    total_length = 0
     
-    # Extract initial and final scaffolds
-    if parts and re.match(r'^\d+(-\d+)?$', parts[0]):
-        part = parts[0]
+    parts = [p.strip() for p in rf_format.split("/") if p.strip()]
+    
+    # Handle initial scaffold (N-terminal extension)
+    if parts and re.match(r'^\d+(-\d+)?$', parts[0]) and not any(c.isalpha() for c in parts[0]):
+        part = parts.pop(0)
         if "-" in part:
             min_length, max_length = map(int, part.split("-"))
         else:
             length = int(part)
-            min_length = max(5, length-5)
-            max_length = length+5
-        
+            min_length = max_length = length
         initial_scaffold = {"min_length": min_length, "max_length": max_length}
-        total_length += min_length
-        parts = parts[1:]
     
-    if parts and re.match(r'^\d+(-\d+)?$', parts[-1]):
-        part = parts[-1]
+    # Handle final scaffold (C-terminal extension)
+    if parts and re.match(r'^\d+(-\d+)?$', parts[-1]) and not any(c.isalpha() for c in parts[-1]):
+        part = parts.pop(-1)
         if "-" in part:
             min_length, max_length = map(int, part.split("-"))
         else:
             length = int(part)
-            min_length = max(5, length-5)
-            max_length = length+5
-        
+            min_length = max_length = length
         final_scaffold = {"min_length": min_length, "max_length": max_length}
-        total_length += min_length
-        parts = parts[:-1]
     
-    # Now parse motifs and linkers in alternating fashion
-    motif_indices = []
-    linker_indices = []
+    # Initialize chain-to-group mapping using the chain order from PDB
+    chain_to_group = {}
+    if chain_order:
+        for idx, chain in enumerate(chain_order):
+            group = chr(ord('A') + idx % 26)
+            chain_to_group[chain] = group
     
-    for i, part in enumerate(parts):
+    # Process motifs and linkers in alternating pattern
+    i = 0
+    while i < len(parts):
+        part = parts[i]
+        
+        # This is a motif definition
         if re.match(r'^[A-Za-z]', part) or re.search(r'\[(M\d+)\]', part):
-            motif_indices.append(i)
-        elif re.match(r'^\d+(-\d+)?$', part):
-            linker_indices.append(i)
-    
-    # Process each motif
-    for i in motif_indices:
-        part = parts[i]
-        
-        # Extract tag
-        tag_match = re.search(r'\[(M\d+)\]', part)
-        tag = tag_match.group(1) if tag_match else f"M{len(motifs) + 1}"
-        
-        # Clean part
-        clean_part = re.sub(r'\[M\d+\]', '', part)
-        
-        # Extract chain and residue range
-        chain_match = re.match(r'^([A-Za-z])', clean_part)
-        chain = chain_match.group(1) if chain_match else "A"
-        
-        range_match = re.search(r'(\d+)-(\d+)', clean_part)
-        if not range_match:
-            raise ValueError(f"Invalid motif format: {part}")
-        
-        start_res = int(range_match.group(1))
-        end_res = int(range_match.group(2))
-        
-        # Assign group (same chain = same group)
-        existing_chains = {m["chain"]: m["group"] for m in motifs}
-        if chain in existing_chains:
-            group = existing_chains[chain]
-        else:
-            # New chain - assign next available group
-            used_groups = set(existing_chains.values())
-            next_group = chr(ord('A') + len(used_groups))
-            group = next_group
-        
-        motifs.append({
-            "chain": chain,
-            "start_res": start_res,
-            "end_res": end_res,
-            "tag": tag,
-            "group": group,
-            "index_in_parts": i
-        })
-        
-        total_length += (end_res - start_res + 1)
-    
-    # Process each linker
-    for i in linker_indices:
-        part = parts[i]
-        
-        # Extract min/max length
-        if "-" in part:
-            min_length, max_length = map(int, part.split("-"))
-        else:
-            length = int(part)
-            min_length = max(5, length-5)
-            max_length = length+5
-        
-        # Find which motif this linker follows
-        prev_motif_index = None
-        for j, motif in enumerate(motifs):
-            if motif["index_in_parts"] < i:
-                if prev_motif_index is None or motifs[prev_motif_index]["index_in_parts"] < motif["index_in_parts"]:
-                    prev_motif_index = j
-        
-        # Find which motif this linker precedes
-        next_motif_index = None
-        for j, motif in enumerate(motifs):
-            if motif["index_in_parts"] > i:
-                if next_motif_index is None or motifs[next_motif_index]["index_in_parts"] > motif["index_in_parts"]:
-                    next_motif_index = j
-        
-        # Only add as inter-motif linker if it's between two motifs
-        if prev_motif_index is not None and next_motif_index is not None:
-            inter_motif_linkers.append({
-                "min_length": min_length,
-                "max_length": max_length,
-                "after_motif_index": prev_motif_index,
-                "before_motif_index": next_motif_index
+            tag_match = re.search(r'\[(M\d+)\]', part)
+            tag = tag_match.group(1) if tag_match else f"M{len(motifs) + 1}"
+            
+            clean_part = re.sub(r'\[M\d+\]', '', part)
+            chain_match = re.match(r'^([A-Za-z])', clean_part)
+            chain = chain_match.group(1) if chain_match else "A"
+            
+            range_match = re.search(r'(\d+)-(\d+)', clean_part)
+            if not range_match:
+                i += 1
+                continue
+            
+            start_res = int(range_match.group(1))
+            end_res = int(range_match.group(2))
+            
+            # Assign group based on chain
+            if chain not in chain_to_group:
+                next_group = chr(ord('A') + len(chain_to_group) % 26)
+                chain_to_group[chain] = next_group
+            
+            group = chain_to_group[chain]
+            
+            # Check for explicit group override at end of motif string
+            group_match = re.search(r'\s([A-Za-z])$', clean_part)
+            if group_match:
+                group = group_match.group(1)
+            
+            motifs.append({
+                "chain": chain,
+                "start_res": start_res,
+                "end_res": end_res,
+                "tag": tag,
+                "group": group,
+                "part_index": i
             })
-            total_length += min_length
+            
+        # This is a linker definition
+        elif re.match(r'^\d+(-\d+)?$', part):
+            if motifs:
+                prev_motif_idx = len(motifs) - 1
+                
+                if "-" in part:
+                    min_length, max_length = map(int, part.split("-"))
+                else:
+                    length = int(part)
+                    min_length = max_length = length
+                
+                inter_motif_linkers.append({
+                    "min_length": min_length,
+                    "max_length": max_length,
+                    "after_motif_index": prev_motif_idx
+                })
+        
+        i += 1
     
-    # Clean up the motifs by removing the temporary index
+    # Clean up temporary indices
     for motif in motifs:
-        if "index_in_parts" in motif:
-            del motif["index_in_parts"]
+        if "part_index" in motif:
+            del motif["part_index"]
     
     return {
         "motifs": motifs,
         "inter_motif_linkers": inter_motif_linkers,
         "initial_scaffold": initial_scaffold,
         "final_scaffold": final_scaffold,
-        "total_length": total_length
+        "chain_to_group": chain_to_group
     }
 
-def generate_genie2_header(parsed_data, pdb_name):
-    output = []
+def validate_motifs(motifs, residues_by_chain, verbose=False):
+    """Verifies that specified residues exist in the PDB structure"""
+    valid = True
+    validation_results = []
     
-    # Name and PDB
-    name = pdb_name.split(".")[0] if "." in pdb_name else pdb_name
-    output.append(f"REMARK 999 NAME   {name}")
-    output.append(f"REMARK 999 PDB    {name}")
+    for i, motif in enumerate(motifs):
+        chain = motif["chain"]
+        start_res = motif["start_res"]
+        end_res = motif["end_res"]
+        
+        # Check if chain exists
+        if chain not in residues_by_chain:
+            validation_results.append(f"Error: Chain {chain} not found in PDB")
+            valid = False
+            continue
+        
+        # Check for missing residues
+        missing = []
+        for res in range(start_res, end_res + 1):
+            if res not in residues_by_chain[chain]:
+                missing.append(res)
+        
+        if missing:
+            msg = f"Error: Motif {i+1} (Chain {chain}:{start_res}-{end_res}) missing residues: {missing[:5]}"
+            if len(missing) > 5:
+                msg += f"... and {len(missing)-5} more"
+            validation_results.append(msg)
+            
+            if verbose:
+                available = sorted(list(residues_by_chain[chain]))
+                res_msg = f"Available residues in chain {chain}: {available[:10]}"
+                if len(available) > 10:
+                    res_msg += f"... and {len(available)-10} more"
+                validation_results.append(res_msg)
+            
+            valid = False
     
-    # Add initial scaffold if present
+    # Print validation results
+    if not valid:
+        for result in validation_results:
+            print(result)
+    
+    return valid
+
+def calculate_length_constraints(parsed_data, residues_by_chain):
+    """Calculate minimum and maximum total sequence lengths based on motifs and scaffolds"""
+    
+    # Start with motif residues (these are fixed lengths)
+    motif_length = 0
+    for motif in parsed_data["motifs"]:
+        motif_length += motif["end_res"] - motif["start_res"] + 1
+    
+    # Add scaffold/linker lengths (these can be variable)
+    min_scaffolds = 0
+    max_scaffolds = 0
+    
+    # Initial scaffold (N-terminal extension)
     if parsed_data["initial_scaffold"]:
-        scaffold = parsed_data["initial_scaffold"]
-        scaffold_line = "REMARK 999 INPUT    "
-        
-        # Right-justify min length in columns 20-23
-        min_len_str = str(scaffold["min_length"])
-        scaffold_line += " " * (4 - len(min_len_str)) + min_len_str
-        
-        # Right-justify max length in columns 24-27
-        max_len_str = str(scaffold["max_length"])
-        scaffold_line += " " * (4 - len(max_len_str)) + max_len_str
-        
-        output.append(scaffold_line)
+        min_scaffolds += parsed_data["initial_scaffold"]["min_length"]
+        max_scaffolds += parsed_data["initial_scaffold"]["max_length"]
+    
+    # Inter-motif linkers
+    for linker in parsed_data["inter_motif_linkers"]:
+        min_scaffolds += linker["min_length"]
+        max_scaffolds += linker["max_length"]
+    
+    # Final scaffold (C-terminal extension)
+    if parsed_data["final_scaffold"]:
+        min_scaffolds += parsed_data["final_scaffold"]["min_length"]
+        max_scaffolds += parsed_data["final_scaffold"]["max_length"]
+    
+    min_total = motif_length + min_scaffolds
+    max_total = motif_length + max_scaffolds
+    
+    return min_total, max_total
+
+def generate_genie2_header(pdb_name, parsed_data, min_total, max_total):
+    """
+    Generate Genie2 header with precise column formatting for SALAD compatibility
+    Based on official Genie2 format from 2b5i.pdb
+    """
+    genie2_header = []
+    
+    # PDB Name lines - exact column formatting required for SALAD
+    genie2_header.append(f"REMARK 999 NAME   {pdb_name}")
+    genie2_header.append(f"REMARK 999 PDB    {pdb_name}")
+    
+    # Add initial scaffold (N-terminal extension) if present
+    if parsed_data["initial_scaffold"]:
+        min_len = parsed_data["initial_scaffold"]["min_length"]
+        max_len = parsed_data["initial_scaffold"]["max_length"]
+        # Format: "REMARK 999 INPUT      5  15" (6 spaces after INPUT, 2-digit numbers, 2 spaces between)
+        genie2_header.append(f"REMARK 999 INPUT      {min_len:2d}  {max_len:2d}")
     
     # Process motifs and any inter-motif linkers
     for i, motif in enumerate(parsed_data["motifs"]):
-        # Add motif
-        motif_line = "REMARK 999 INPUT  "
-        motif_line += motif["chain"]
+        chain = motif["chain"]
+        start_res = motif["start_res"]
+        end_res = motif["end_res"]
+        group = motif["group"]
         
-        # Right-justify start residue in columns 20-23
-        start_str = str(motif["start_res"])
-        motif_line += " " * (4 - len(start_str)) + start_str
+        # Format: "REMARK 999 INPUT  A  11  23 B" (2 spaces after INPUT, 1 space after chain, 2 spaces between numbers, 1 space before group)
+        genie2_header.append(f"REMARK 999 INPUT  {chain}  {start_res:2d}  {end_res:2d} {group}")
         
-        # Right-justify end residue in columns 24-27
-        end_str = str(motif["end_res"])
-        motif_line += " " * (4 - len(end_str)) + end_str
-        
-        # Add group at column 29
-        motif_line += " " + motif["group"]
-        
-        output.append(motif_line)
-        
-        # Check if there's a linker after this motif
+        # Add linker after this motif if present
         for linker in parsed_data["inter_motif_linkers"]:
             if linker["after_motif_index"] == i:
-                # This linker follows the current motif
-                linker_line = "REMARK 999 INPUT    "
-                
-                # Right-justify min length in columns 20-23
-                min_len_str = str(linker["min_length"])
-                linker_line += " " * (4 - len(min_len_str)) + min_len_str
-                
-                # Right-justify max length in columns 24-27
-                max_len_str = str(linker["max_length"])
-                linker_line += " " * (4 - len(max_len_str)) + max_len_str
-                
-                output.append(linker_line)
+                min_len = linker["min_length"]
+                max_len = linker["max_length"]
+                # Format: "REMARK 999 INPUT     10  20" (5 spaces after INPUT)
+                genie2_header.append(f"REMARK 999 INPUT     {min_len:2d}  {max_len:2d}")
     
-    # Add final scaffold if present
+    # Add final scaffold (C-terminal extension) if present
     if parsed_data["final_scaffold"]:
-        scaffold = parsed_data["final_scaffold"]
-        scaffold_line = "REMARK 999 INPUT    "
-        
-        # Right-justify min length in columns 20-23
-        min_len_str = str(scaffold["min_length"])
-        scaffold_line += " " * (4 - len(min_len_str)) + min_len_str
-        
-        # Right-justify max length in columns 24-27
-        max_len_str = str(scaffold["max_length"])
-        scaffold_line += " " * (4 - len(max_len_str)) + max_len_str
-        
-        output.append(scaffold_line)
+        min_len = parsed_data["final_scaffold"]["min_length"]
+        max_len = parsed_data["final_scaffold"]["max_length"]
+        genie2_header.append(f"REMARK 999 INPUT      {min_len:2d}  {max_len:2d}")
     
-    # Add length constraints
-    min_total = max(80, parsed_data["total_length"])
-    max_total = max(200, int(min_total * 1.5))
+    # Add length constraints - exact formatting per documentation
+    genie2_header.append(f"REMARK 999 MINIMUM TOTAL LENGTH      {min_total}")
+    genie2_header.append(f"REMARK 999 MAXIMUM TOTAL LENGTH      {max_total}")
     
-    min_len_line = "REMARK 999 MINIMUM TOTAL LENGTH      " + str(min_total)
-    max_len_line = "REMARK 999 MAXIMUM TOTAL LENGTH      " + str(max_total)
-    
-    output.append(min_len_line)
-    output.append(max_len_line)
-    
-    return "\n".join(output)
+    return "\n".join(genie2_header)
 
-def fix_pdb_for_salad(pdb_content, verbose=False):
-    lines = pdb_content.splitlines()
-    
-    # Separate different section types
-    remark_999_lines = []
-    other_remark_lines = []
-    atom_lines = []
-    other_lines = []
-    
-    for line in lines:
-        if line.startswith('REMARK 999'):
-            remark_999_lines.append(line)
-        elif line.startswith('REMARK'):
-            other_remark_lines.append(line)
-        elif line.startswith(('ATOM', 'HETATM')):
-            atom_lines.append(line)
-        else:
-            other_lines.append(line)
-    
-    # Process REMARK 999 lines to ensure exact column formatting
-    fixed_remark_999_lines = []
-    
-    for line in remark_999_lines:
-        if "INPUT" in line and len(line) > 16:
-            parts = line.split()
-            
-            if len(parts) >= 5 and parts[3].isalpha() and len(parts[3]) == 1:
-                # This is a motif segment line
-                chain = parts[3]
-                
-                try:
-                    start_res = int(parts[4])
-                    end_res = int(parts[5])
-                    group = parts[6] if len(parts) > 6 else chain
-                    
-                    # Reconstruct with exact column positioning
-                    new_line = "REMARK 999 INPUT  "  # Columns 1-16
-                    new_line += chain                 # Column 19
-                    
-                    # Right-justify start residue in columns 20-23
-                    start_res_str = str(start_res)
-                    new_line += " " * (4 - len(start_res_str)) + start_res_str
-                    
-                    # Right-justify end residue in columns 24-27
-                    end_res_str = str(end_res)
-                    new_line += " " * (4 - len(end_res_str)) + end_res_str
-                    
-                    # Column 29: Group
-                    new_line += " " + group
-                    
-                    fixed_remark_999_lines.append(new_line)
-                except (ValueError, IndexError):
-                    # If we can't parse it properly, keep it as is
-                    fixed_remark_999_lines.append(line)
-                    
-            elif len(parts) >= 4 and parts[3].isdigit():
-                # This is a scaffold segment line
-                try:
-                    min_len = int(parts[3])
-                    max_len = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else min_len
-                    
-                    # Reconstruct with exact column positioning
-                    new_line = "REMARK 999 INPUT    "  # Columns 1-16
-                    
-                    # Right-justify min length in columns 20-23
-                    min_len_str = str(min_len)
-                    new_line += " " * (4 - len(min_len_str)) + min_len_str
-                    
-                    # Right-justify max length in columns 24-27
-                    max_len_str = str(max_len)
-                    new_line += " " * (4 - len(max_len_str)) + max_len_str
-                    
-                    fixed_remark_999_lines.append(new_line)
-                except (ValueError, IndexError):
-                    # If we can't parse it properly, keep it as is
-                    fixed_remark_999_lines.append(line)
-                    
-            else:
-                fixed_remark_999_lines.append(line)
-        
-        elif "MINIMUM TOTAL LENGTH" in line or "MAXIMUM TOTAL LENGTH" in line:
-            # Length constraint line
+def ensure_column_formatting(line):
+    """Fix existing REMARK 999 lines to have proper column formatting"""
+    if line.startswith("REMARK 999 INPUT  ") and len(line) > 16:
+        parts = line.split()
+        if len(parts) >= 5 and len(parts[3]) == 1 and parts[3].isalpha():
+            chain = parts[3]
             try:
-                parts = line.split()
-                length_type = "MINIMUM" if "MINIMUM" in line else "MAXIMUM"
-                value = int(parts[-1])
+                start_res = int(parts[4])
+                end_res = int(parts[5])
+                group = parts[6] if len(parts) > 6 else chain
                 
-                # Reconstruct with exact column positioning
-                new_line = f"REMARK 999 {length_type} TOTAL LENGTH      {value}"
-                
-                fixed_remark_999_lines.append(new_line)
+                # Format to match official Genie2: "REMARK 999 INPUT  A  11  23 B"
+                new_line = f"REMARK 999 INPUT  {chain}  {start_res:2d}  {end_res:2d} {group}"
+                return new_line
             except (ValueError, IndexError):
-                # If we can't parse it properly, keep it as is
-                fixed_remark_999_lines.append(line)
+                pass
+        
+    elif line.startswith("REMARK 999 INPUT     ") or line.startswith("REMARK 999 INPUT      "):
+        parts = line.split()
+        if len(parts) >= 4 and parts[3].isdigit():
+            try:
+                min_len = int(parts[3])
+                max_len = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else min_len
                 
-        else:
-            # Keep other REMARK 999 lines as is
-            fixed_remark_999_lines.append(line)
-    
-    # Reassemble the file with fixed formatting
-    result = []
-    result.extend(fixed_remark_999_lines)
-    result.extend(other_remark_lines)
-    result.extend(atom_lines)
-    result.extend(other_lines)
-    
-    if verbose:
-        print(f"Fixed {len(fixed_remark_999_lines)} REMARK 999 lines for exact column positioning")
-    
-    return "\n".join(result)
+                # Different spacing for initial/final scaffolds vs inter-motif linkers
+                # Initial/final scaffolds: 6 spaces after INPUT
+                # Inter-motif linkers: 5 spaces after INPUT
+                # Default to 5 spaces (inter-motif) unless we can determine it's initial/final
+                new_line = f"REMARK 999 INPUT     {min_len:2d}  {max_len:2d}"
+                return new_line
+            except (ValueError, IndexError):
+                pass
+            
+    elif "MINIMUM TOTAL LENGTH" in line or "MAXIMUM TOTAL LENGTH" in line:
+        parts = line.split()
+        length_type = "MINIMUM" if "MINIMUM" in line else "MAXIMUM"
+        value = parts[-1]
+        
+        # EXACT column positioning per SALAD requirements
+        return f"REMARK 999 {length_type} TOTAL LENGTH      {value}"
+        
+    return line
 
+def reorder_pdb_residues(pdb_content, parsed_data, do_reordering=False):
+    """
+    Reorders residues in the PDB file to match the order specified in RFDiffusion format.
+    If do_reordering=False, just cleans existing REMARK 999 lines without changing order.
+    """
+    residues_by_chain, _, residue_atoms, _ = parse_pdb(pdb_content)
+    
+    if not do_reordering:
+        # Don't reorder, just clean existing REMARK 999 lines
+        clean_lines = []
+        for line in pdb_content.splitlines():
+            if not line.startswith("REMARK 999"):
+                clean_lines.append(line)
+        return "\n".join(clean_lines)
+    
+    # Reorder atoms according to motif specifications
+    ordered_lines = []
+    header_lines = []
+    footer_lines = []
+    
+    # Extract header and footer lines
+    for line in pdb_content.splitlines():
+        if not line.startswith(("ATOM", "HETATM")):
+            if line.startswith(("END", "TER")):
+                footer_lines.append(line)
+            elif not line.startswith("REMARK 999"):  # Skip existing REMARK 999 lines
+                header_lines.append(line)
+    
+    ordered_lines.extend(header_lines)
+    
+    # Sort motifs by group, then chain, then start residue
+    sorted_motifs = sorted(parsed_data["motifs"], key=lambda m: (m.get("group", "Z"), m["chain"], m["start_res"]))
+    
+    # Add atoms from each motif in order
+    for motif in sorted_motifs:
+        chain = motif["chain"]
+        start_res = motif["start_res"]
+        end_res = motif["end_res"]
+        
+        for res in range(start_res, end_res + 1):
+            if (chain, res) in residue_atoms:
+                for atom_line in residue_atoms[(chain, res)]:
+                    ordered_lines.append(atom_line)
+    
+    ordered_lines.extend(footer_lines)
+    return "\n".join(ordered_lines)
 
-def process_file(pdb_path, rf_format, output_dir, verbose=False):
+def process_file(pdb_path, rf_format, output_dir, verbose=False, reorder_residues=False):
+    """
+    Process a single PDB file with the specified format
+    """
     try:
-        # Read PDB content
         with open(pdb_path, 'r') as f:
             pdb_content = f.read()
         
@@ -378,96 +369,74 @@ def process_file(pdb_path, rf_format, output_dir, verbose=False):
         pdb_name = os.path.splitext(pdb_file)[0]
         
         # Parse PDB structure
-        residues_by_chain, chain_boundaries = parse_pdb(pdb_content)
+        residues_by_chain, chain_boundaries, _, chain_order = parse_pdb(pdb_content)
         
         if verbose:
-            print(f"\nChain boundaries in {pdb_file}:")
+            print(f"\nPDB file: {pdb_file}")
+            print(f"Chains detected: {', '.join(chain_order)}")
             for chain, (min_res, max_res) in chain_boundaries.items():
-                print(f"Chain {chain}: {min_res} - {max_res} ({len(residues_by_chain[chain])} residues)")
+                print(f"Chain {chain}: residues {min_res}-{max_res} ({len(residues_by_chain[chain])} total)")
         
-        # Handle already Genie2 formatted files
+        # Special case for existing Genie2 files
         if rf_format.lower() == "genie2":
-            fixed_content = fix_pdb_for_salad(pdb_content, verbose)
+            fixed_lines = []
+            for line in pdb_content.splitlines():
+                if line.startswith("REMARK 999"):
+                    fixed_lines.append(ensure_column_formatting(line))
+                else:
+                    fixed_lines.append(line)
             
-            # Write to output file
             output_path = os.path.join(output_dir, f"{pdb_name}_genie2.pdb")
             with open(output_path, 'w') as f:
-                f.write(fixed_content)
+                f.write("\n".join(fixed_lines))
             
             print(f"Successfully processed existing Genie2 file: {output_path}")
             return True
         
-        # Process RFDiffusion format
-        parsed_data = parse_rf_format(rf_format)
+        # Parse RF format specification
+        parsed_data = parse_rf_format(rf_format, chain_order)
         
         if verbose:
             print("\nParsed RFDiffusion format:")
-            
-            # Show motifs
+            print(f"  Chain to Group mapping: {parsed_data['chain_to_group']}")
+            print(f"  Initial scaffold: {parsed_data['initial_scaffold']}")
             print(f"  Motifs ({len(parsed_data['motifs'])}):")
             for i, motif in enumerate(parsed_data["motifs"]):
-                print(f"    Motif {i+1}: Chain {motif['chain']}, "
-                      f"Residues {motif['start_res']}-{motif['end_res']}, "
-                      f"Group {motif['group']}")
-            
-            # Show linkers
-            print(f"  Linkers/Extensions ({len(parsed_data['linkers'])}):")
-            for i, linker in enumerate(parsed_data["linkers"]):
-                position = "N-terminal" if i == 0 and i < len(parsed_data["motifs"]) else \
-                           "C-terminal" if i >= len(parsed_data["motifs"]) else \
-                           f"Between motifs {i} and {i+1}"
-                print(f"    Linker {i+1} ({position}): "
-                      f"{linker['min_length']}-{linker['max_length']} residues")
-        
-        # Generate Genie2 header
-        genie2_header = generate_genie2_header(parsed_data, pdb_name)
+                print(f"    {i+1}: Chain {motif['chain']} residues {motif['start_res']}-{motif['end_res']} (Group {motif['group']})")
+            print(f"  Linkers ({len(parsed_data['inter_motif_linkers'])}):")
+            for i, linker in enumerate(parsed_data["inter_motif_linkers"]):
+                print(f"    {i+1}: After motif {linker['after_motif_index']+1}, length {linker['min_length']}-{linker['max_length']}")
+            print(f"  Final scaffold: {parsed_data['final_scaffold']}")
         
         # Validate motifs against PDB structure
-        for i, motif in enumerate(parsed_data["motifs"]):
-            chain = motif["chain"]
-            start_res = motif["start_res"]
-            end_res = motif["end_res"]
-            
-            if chain not in residues_by_chain:
-                print(f"Warning: Chain {chain} not found in PDB")
-                continue
-                
-            missing = []
-            for res in range(start_res, end_res + 1):
-                if res not in residues_by_chain[chain]:
-                    missing.append(res)
-            
-            if missing:
-                print(f"Warning: Motif {i+1} missing residues: {missing[:5]}..." +
-                      ("" if len(missing) <= 5 else f" and {len(missing)-5} more"))
-                if verbose:
-                    print(f"  Available residues in chain {chain}: " +
-                          f"{sorted(list(residues_by_chain[chain]))[:10]}..." +
-                          ("" if len(residues_by_chain[chain]) <= 10 else " and more"))
+        if not validate_motifs(parsed_data["motifs"], residues_by_chain, verbose):
+            print(f"Warning: Invalid motifs found in {pdb_file}")
+            if not verbose:
+                print("Run with --verbose for more details")
         
-        # Remove any existing REMARK 999 lines from the original PDB
-        clean_pdb_lines = [line for line in pdb_content.splitlines() 
-                          if not line.startswith('REMARK 999')]
-        clean_pdb = "\n".join(clean_pdb_lines)
+        # Calculate length constraints
+        min_total, max_total = calculate_length_constraints(parsed_data, residues_by_chain)
         
-        # Combine header and cleaned content
-        combined_content = genie2_header + "\n" + clean_pdb
+        if verbose:
+            print(f"Length constraints: MIN={min_total}, MAX={max_total}")
         
-        # Write output
+        # Generate Genie2 header
+        header = generate_genie2_header(pdb_name, parsed_data, min_total, max_total)
+        
+        # Process residues - reorder if requested
+        clean_pdb = reorder_pdb_residues(pdb_content, parsed_data, reorder_residues)
+        
+        # Combine header and PDB content
+        combined_content = header + "\n" + clean_pdb
+        
+        # Write output file
         output_path = os.path.join(output_dir, f"{pdb_name}_genie2.pdb")
         with open(output_path, 'w') as f:
             f.write(combined_content)
         
         print(f"Successfully created {output_path}")
-        
-        # If verbose, show the generated header
-        if verbose:
-            print("\nGenerated Genie2 header:")
-            for line in genie2_header.splitlines():
-                print(f"  {line}")
-        
         return True
-    
+        
     except Exception as e:
         print(f"Error processing {pdb_path}: {e}")
         if verbose:
@@ -475,8 +444,8 @@ def process_file(pdb_path, rf_format, output_dir, verbose=False):
             traceback.print_exc()
         return False
 
-
-def process_csv(csv_path, pdb_dir, output_dir, verbose=False):
+def process_csv(csv_path, pdb_dir, output_dir, verbose=False, reorder_residues=False):
+    """Process multiple specifications from a CSV file"""
     try:
         with open(csv_path, 'r') as f:
             reader = csv.DictReader(f)
@@ -490,7 +459,7 @@ def process_csv(csv_path, pdb_dir, output_dir, verbose=False):
             rf_format = spec.get('rf_format')
             
             if not pdb_file or not rf_format:
-                print(f"Error: Row {i+1} missing required fields (pdb_file, rf_format)")
+                print(f"Error: Row {i+1} missing required fields")
                 continue
             
             pdb_path = os.path.join(pdb_dir, pdb_file) if pdb_dir else pdb_file
@@ -500,7 +469,7 @@ def process_csv(csv_path, pdb_dir, output_dir, verbose=False):
                 continue
             
             print(f"\nProcessing {pdb_file} with format: {rf_format}")
-            if process_file(pdb_path, rf_format, output_dir, verbose):
+            if process_file(pdb_path, rf_format, output_dir, verbose, reorder_residues):
                 success += 1
         
         print(f"\nProcessed {success} of {len(specs)} specifications successfully")
@@ -513,40 +482,31 @@ def process_csv(csv_path, pdb_dir, output_dir, verbose=False):
             traceback.print_exc()
         return 0
 
-
 def main():
-    """Main function"""
     parser = argparse.ArgumentParser(
-        description='Convert RFDiffusion format to Genie2 format for SALAD compatibility',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description='Convert RFDiffusion format to Genie2 format for SALAD compatibility'
     )
     
-    # Input options
     input_group = parser.add_mutually_exclusive_group(required=True)
     input_group.add_argument('-f', '--pdb_file', help='Single PDB file')
     input_group.add_argument('-d', '--pdb_dir', help='Directory with PDB files')
     
-    # Format options
     format_group = parser.add_mutually_exclusive_group(required=True)
-    format_group.add_argument('-i', '--input', help='RFDiffusion format (e.g., "A1-80[M1]/30/[M2]B81-100") or "genie2"')
+    format_group.add_argument('-i', '--input', help='RFDiffusion format or "genie2"')
     format_group.add_argument('-c', '--csv', help='CSV file with pdb_file,rf_format columns')
     
-    # Output and other options
     parser.add_argument('-o', '--output', required=True, help='Output directory')
     parser.add_argument('-v', '--verbose', action='store_true', help='Verbose output')
+    parser.add_argument('-r', '--reorder', action='store_true', help='Reorder residues according to motif order')
     
     args = parser.parse_args()
     
-    # Create output directory
     os.makedirs(args.output, exist_ok=True)
     
-    # Process files
     if args.csv:
-        # Process multiple files with different formats from CSV
         pdb_dir = args.pdb_dir if args.pdb_dir else os.path.dirname(args.csv)
-        process_csv(args.csv, pdb_dir, args.output, args.verbose)
+        process_csv(args.csv, pdb_dir, args.output, args.verbose, args.reorder)
     else:
-        # Process single file or multiple files with same format
         pdb_files = []
         if args.pdb_file:
             pdb_files = [args.pdb_file]
@@ -561,12 +521,10 @@ def main():
         success = 0
         
         for pdb_path in pdb_files:
-            if process_file(pdb_path, args.input, args.output, args.verbose):
+            if process_file(pdb_path, args.input, args.output, args.verbose, args.reorder):
                 success += 1
         
         print(f"\nProcessed {success} of {len(pdb_files)} files successfully")
-    
-    print("Files are ready for SALAD 🧬")
 
 if __name__ == "__main__":
     main()
